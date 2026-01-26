@@ -16,16 +16,17 @@ from sqlalchemy import select
 from pydantic_bff import inject, Transformer
 
 TeamId = int
+UserId = int
 
 // contracts
 
-class BatchTeamArg(BaseModel): 
-    team_ids: list[TeamId]
-
 class UserDTO(BaseModel):
-    id: int
+    id: UserId
     name: str
     company_id: int
+
+class BatchTeamArg(BaseModel): 
+    team_ids: list[TeamId]
 
 class TeamDTO(BaseModel):
     id: TeamId
@@ -36,7 +37,7 @@ class TeamDTO(BaseModel):
 // featchers
 
 @inject
-async def get_users_by_ids(session: AsyncSession, user_ids: list[int]) -> list[UserDTO]:
+async def get_users_by_ids(session: AsyncSession, user_ids: list[UserId]) -> list[UserDTO]:
     result = await session.execute(select(User).where(User.id.in_(user_ids)))
     return result.scalars().all()
 
@@ -50,7 +51,7 @@ team_router = APIRouter(prefix='/teams')
 
 
 @team_router.get('/batch')
-async def batch_of_teams_by_ids(team_ids: list[int]) -> list[TeamDTO]:
+async def batch_of_teams_by_ids(team_ids: list[TeamId]) -> list[TeamDTO]:
     result = await query_executor.query(list[TeamDTO], BatchTeamArg(team_ids=team_ids))
     return result 
 
