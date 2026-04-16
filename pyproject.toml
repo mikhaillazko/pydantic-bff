@@ -43,7 +43,7 @@ dev = [
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "src",
+    "src/pydantic_bff",
     "README.md",
     "LICENSE",
 ]
@@ -52,13 +52,13 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/pydantic_bff"]
 exclude = [
     "**/*_test.py",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src", "."]
+testpaths = ["src/pydantic_bff", "."]
 python_files = ["*_test.py"]
 
 [tool.ruff]
@@ -79,7 +79,7 @@ force-single-line = true
 quote-style = "single"
 
 [tool.ty.src]
-include = ["src"]
+include = ["src/pydantic_bff"]
 exclude = ["**/*_test.py"]
 
 [tool.ty.rules]

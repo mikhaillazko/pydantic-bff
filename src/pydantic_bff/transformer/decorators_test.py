@@ -6,13 +6,13 @@ from typing import Annotated
 import pytest
 from pydantic import BaseModel
 
-from src.transformer.builder import build_transform_annotated
-from src.transformer.decorators import bff_model
-from src.transformer.inspection import introspect_model_transformers
-from src.transformer.registry import TransformerRegistry
-from src.transformer.types import _BATCHES_ATTR
-from src.transformer.types import BatchArg
-from src.transformer.types import BatchInfo
+from pydantic_bff.transformer.builder import build_transform_annotated
+from pydantic_bff.transformer.decorators import bff_model
+from pydantic_bff.transformer.inspection import introspect_model_transformers
+from pydantic_bff.transformer.registry import TransformerRegistry
+from pydantic_bff.transformer.types import _BATCHES_ATTR
+from pydantic_bff.transformer.types import BatchArg
+from pydantic_bff.transformer.types import BatchInfo
 
 
 @dataclass(frozen=True)
@@ -31,12 +31,12 @@ def test_bff_model_attaches_batches_when_transformer_field_present(noop_injector
     def transform_user(user_id: UserId, batch: BatchArg[UserId]) -> User:
         return User(id=user_id, name='')
 
-    UserT = build_transform_annotated(transform_user)
+    user_transformer = build_transform_annotated(transform_user)
 
     @bff_model
     class TeamDTO(BaseModel):
         id: int
-        owner: Annotated[User, UserT]
+        owner: Annotated[User, user_transformer]
 
     batches = getattr(TeamDTO, _BATCHES_ATTR, [])
     assert len(batches) == 1
@@ -66,13 +66,13 @@ def test_introspect_model_transformers_is_idempotent(noop_injector) -> None:
     transformer = TransformerRegistry(injector=noop_injector)
 
     @transformer
-    def transform(uid: UserId, batch: BatchArg[UserId]) -> User:
-        return User(id=uid, name='')
+    def transform_user(user_id: UserId, batch: BatchArg[UserId]) -> User:
+        return User(id=user_id, name='')
 
-    T = build_transform_annotated(transform)
+    user_transformer = build_transform_annotated(transform_user)
 
     class DTO(BaseModel):
-        owner: Annotated[User, T]
+        owner: Annotated[User, user_transformer]
 
     introspect_model_transformers(DTO)
     first = list(DTO.__batches__)  # type: ignore[attr-defined]

@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from src.injections.registry import IInjectorRegistry
+from pydantic_bff.injections.registry import IInjectorRegistry
 
 from .query_annotation import QueryAnnotation
 from .query_annotation import extract_query_return_type

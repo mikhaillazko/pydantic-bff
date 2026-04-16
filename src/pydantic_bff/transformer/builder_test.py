@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import get_args
 from typing import get_origin
 
-from src.transformer.builder import build_transform_annotated
-from src.transformer.registry import TransformerRegistry
-from src.transformer.types import TransformerAnnotation
+from pydantic_bff.transformer.builder import build_transform_annotated
+from pydantic_bff.transformer.registry import TransformerRegistry
+from pydantic_bff.transformer.types import TransformerAnnotation
 
 
 @dataclass(frozen=True)

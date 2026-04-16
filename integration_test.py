@@ -4,15 +4,15 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from src.injections.registry import InjectorRegistry
-from src.query_executor.query import Query
-from src.query_executor.query_executor import QueryExecutor
-from src.query_executor.registry import QueriesRegistry
-from src.transformer.batcher import populate_context_with_batch
-from src.transformer.builder import build_transform_annotated
-from src.transformer.decorators import bff_model
-from src.transformer.registry import TransformerRegistry
-from src.transformer.types import BatchArg
+from pydantic_bff.injections.registry import InjectorRegistry
+from pydantic_bff.query_executor.query import Query
+from pydantic_bff.query_executor.query_executor import QueryExecutor
+from pydantic_bff.query_executor.registry import QueriesRegistry
+from pydantic_bff.transformer.batcher import populate_context_with_batch
+from pydantic_bff.transformer.builder import build_transform_annotated
+from pydantic_bff.transformer.decorators import bff_model
+from pydantic_bff.transformer.registry import TransformerRegistry
+from pydantic_bff.transformer.types import BatchArg
 
 
 @dataclass(frozen=True)
@@ -29,8 +29,8 @@ def test_three_phase_flow_issues_one_bulk_call_per_page() -> None:
     transformer = TransformerRegistry(injector=injector)  # type: ignore[arg-type]
 
     # Override so that any `Depends(QueryExecutor)` within the scope yields our shared executor.
-    qe_class = QueryExecutor.__origin__  # unwrap @dependency Annotated alias
-    injector.dependency_provider.dependency_overrides[qe_class] = lambda: executor
+    query_executor_class = QueryExecutor.__origin__  # unwrap @dependency Annotated alias
+    injector.dependency_provider.dependency_overrides[query_executor_class] = lambda: executor
 
     # Bulk @query handler (this is what a real app would back with a DB call).
     db_calls: list[frozenset[int]] = []
@@ -45,16 +45,16 @@ def test_three_phase_flow_issues_one_bulk_call_per_page() -> None:
 
     # Transformer: takes the per-row id, the batch of all ids for this field, and the injected executor.
     @transformer
-    def transform_owner(owner_id: int, batch: BatchArg[int], ex: QueryExecutor) -> User | None:
-        users = ex.fetch(FetchUsers(ids=batch.ids))
+    def transform_owner(owner_id: int, batch: BatchArg[int], query_executor: QueryExecutor) -> User | None:
+        users = query_executor.fetch(FetchUsers(ids=batch.ids))
         return users.get(owner_id)
 
-    OwnerT = build_transform_annotated(transform_owner)
+    owner_transformer = build_transform_annotated(transform_owner)
 
     @bff_model
     class TeamDTO(BaseModel):
         id: int
-        owner: OwnerT
+        owner: owner_transformer
 
     # Raw page of backend rows (e.g. SQL result rows mapped to dicts).
     rows: list[dict[str, int]] = [
@@ -67,13 +67,13 @@ def test_three_phase_flow_issues_one_bulk_call_per_page() -> None:
     @injector.entrypoint
     def render_page() -> list[TeamDTO]:
         # Phase 1 — Plan: collect ids for every batchable field.
-        ctx = populate_context_with_batch(TeamDTO, rows)
+        context = populate_context_with_batch(TeamDTO, rows)
         # Phase 2 — Fetch: pre-warm the cache with one bulk call per batch.
         for batch_info in TeamDTO.__batches__:  # type: ignore[attr-defined]
-            ex = executor  # in real apps, resolved via DI within the same scope
-            ex.fetch(FetchUsers(ids=frozenset(ctx[batch_info.key])))
+            # in real apps, resolved via DI within the same scope
+            executor.fetch(FetchUsers(ids=frozenset(context[batch_info.key])))
         # Phase 3 — Merge: Pydantic validation fires each transformer; cache hit is guaranteed.
-        return [TeamDTO.model_validate(row, context=ctx) for row in rows]
+        return [TeamDTO.model_validate(row, context=context) for row in rows]
 
     results = render_page()
 

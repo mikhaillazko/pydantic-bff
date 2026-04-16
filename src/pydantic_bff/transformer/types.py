@@ -10,8 +10,8 @@ from typing import get_origin
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic_core.core_schema import ValidationInfo
 
-from src.injections.dependant import cached_signature
-from src.injections.reflection import find_arg_info
+from pydantic_bff.injections.dependant import cached_signature
+from pydantic_bff.injections.reflection import find_arg_info
 
 _TRANSFORMER_ATTR = '__transformer__'
 _BATCHES_ATTR = '__batches__'

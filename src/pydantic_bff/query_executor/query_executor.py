@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 
-from src.injections.dependency import dependency
+from pydantic_bff.injections.dependency import dependency
 
 from .query import Query
 from .query_cache import QueryCache

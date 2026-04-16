@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from src.query_executor.query import Query
+from pydantic_bff.query_executor.query import Query
 
 
 @dataclass(frozen=True)

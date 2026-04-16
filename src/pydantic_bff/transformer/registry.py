@@ -9,7 +9,7 @@ from typing import get_type_hints
 
 from pydantic_core.core_schema import ValidationInfo
 
-from src.injections.registry import IInjectorRegistry
+from pydantic_bff.injections.registry import IInjectorRegistry
 
 from .types import _TRANSFORMER_ATTR
 from .types import BatchArg

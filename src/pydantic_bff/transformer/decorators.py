@@ -15,7 +15,7 @@ def bff_model[T: type[PydanticBaseModel]](cls: T) -> T:
     Usage::
 
         from pydantic import BaseModel
-        from src import bff_model
+        from pydantic_bff import bff_model
 
         @bff_model
         class TeamDTO(BaseModel):

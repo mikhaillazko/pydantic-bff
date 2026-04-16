@@ -5,10 +5,10 @@ from dataclasses import dataclass
 import pytest
 from pydantic_core.core_schema import ValidationInfo
 
-from src.transformer.registry import TransformerRegistry
-from src.transformer.types import _TRANSFORMER_ATTR
-from src.transformer.types import BatchArg
-from src.transformer.types import TransformerAnnotation
+from pydantic_bff.transformer.registry import TransformerRegistry
+from pydantic_bff.transformer.types import _TRANSFORMER_ATTR
+from pydantic_bff.transformer.types import BatchArg
+from pydantic_bff.transformer.types import TransformerAnnotation
 
 
 @dataclass(frozen=True)

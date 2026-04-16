@@ -50,7 +50,7 @@ Phase 3 — Merge   Model.model_validate(row, context=ctx) for each row
 from dataclasses import dataclass
 from pydantic import BaseModel
 
-from src import (
+from pydantic_bff import (
     BatchArg,
     InjectorRegistry,
     QueriesRegistry,
@@ -77,7 +77,8 @@ transformer = TransformerRegistry(injector=injector)
 executor = QueryExecutor(queries_registry=queries)
 
 # Make Depends(QueryExecutor) resolve to our shared instance within the scope.
-injector.dependency_provider.dependency_overrides[QueryExecutor.__origin__] = lambda: executor
+query_executor_class = QueryExecutor.__origin__  # unwrap @dependency Annotated alias
+injector.dependency_provider.dependency_overrides[query_executor_class] = lambda: executor
 
 # --- Bulk query -------------------------------------------------------------
 # A Query's return type (dict[int, User]) is carried in Query[...].
@@ -99,19 +100,19 @@ def fetch_users(args: FetchUsers) -> dict[int, User]:
 def transform_owner(
     owner_id: int,
     batch: BatchArg[int],
-    ex: QueryExecutor,
+    query_executor: QueryExecutor,
 ) -> User | None:
-    users = ex.fetch(FetchUsers(ids=batch.ids))  # cache hit after Phase 2
+    users = query_executor.fetch(FetchUsers(ids=batch.ids))  # cache hit after Phase 2
     return users.get(owner_id)
 
-OwnerT = build_transform_annotated(transform_owner)
+owner_transformer = build_transform_annotated(transform_owner)
 
 # --- Response model --------------------------------------------------------
 
 @bff_model
 class TeamDTO(BaseModel):
     id: int
-    owner: OwnerT  # OwnerT already encodes `User | None` as its base type
+    owner: owner_transformer  # owner_transformer already encodes `User | None` as its base type
 
 # --- Handler ---------------------------------------------------------------
 
@@ -124,14 +125,14 @@ def render_teams_page() -> list[TeamDTO]:
     ]
 
     # Phase 1 — Plan
-    ctx = populate_context_with_batch(TeamDTO, rows)
+    context = populate_context_with_batch(TeamDTO, rows)
 
     # Phase 2 — Fetch (one bulk call per batch field)
     for batch in TeamDTO.__batches__:
-        executor.fetch(FetchUsers(ids=frozenset(ctx[batch.key])))
+        executor.fetch(FetchUsers(ids=frozenset(context[batch.key])))
 
     # Phase 3 — Merge
-    return [TeamDTO.model_validate(row, context=ctx) for row in rows]
+    return [TeamDTO.model_validate(row, context=context) for row in rows]
 ```
 
 A single page of N rows issues **one** `fetch_users(...)` call — regardless of N, and
@@ -175,17 +176,18 @@ field annotation is a two-step dance:
 
 ```python
 @transformer
-def transform_owner(owner_id: int, ex: QueryExecutor) -> User | None:
+def transform_owner(owner_id: int, query_executor: QueryExecutor) -> User | None:
     ...
 
-OwnerT = build_transform_annotated(transform_owner)  # an Annotated[...] alias
+owner_transformer = build_transform_annotated(transform_owner)  # an Annotated[...] alias
 
 class TeamDTO(BaseModel):
-    owner: OwnerT
+    owner: owner_transformer
 ```
 
-`OwnerT` is `Annotated[User | None, PlainValidator(transform_owner), ...]` — use it
-directly as the field type. You can also compose with unions: `second_owner: OwnerT | None`.
+`owner_transformer` is `Annotated[User | None, PlainValidator(transform_owner), ...]` —
+use it directly as the field type. You can also compose with unions:
+`second_owner: owner_transformer | None`.
 
 ### `BatchArg[T]`
 
@@ -244,7 +246,7 @@ Override providers in tests with
 ### Testing with `QueryExecutorMock`
 
 ```python
-from src import QueryExecutorMock
+from pydantic_bff import QueryExecutorMock
 
 mock = QueryExecutorMock(queries_registry=queries)
 mock.stub_query(FetchUsers, {10: User(id=10, name='u10')})
