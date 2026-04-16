@@ -1,0 +1,189 @@
+"""Tests for :class:`BFF` and :class:`QueryRouter` — local registration + include_router merge."""
+
+from dataclasses import dataclass
+
+import pytest
+from pydantic import BaseModel
+
+from pydantic_bff import BFF
+from pydantic_bff import BatchArg
+from pydantic_bff import Query
+from pydantic_bff import QueryExecutor
+from pydantic_bff import QueryRouter
+from pydantic_bff import build_transform_annotated
+from pydantic_bff.exceptions import QueryRegistrationError
+
+
+@dataclass(frozen=True)
+class User:
+    id: int
+    name: str
+
+
+def test_bff_app_renders_a_transformer_field() -> None:
+    app = BFF()
+
+    db_calls: list[frozenset[int]] = []
+
+    class FetchUsers(Query[dict[int, User]]):
+        ids: frozenset[int]
+
+    @app.queries
+    def fetch_users(args: FetchUsers) -> dict[int, User]:
+        db_calls.append(args.ids)
+        return {i: User(id=i, name=f'u{i}') for i in args.ids}
+
+    @app.transformer(prefetch=FetchUsers)
+    def transform_owner(
+        owner_id: int,
+        batch: BatchArg[int],
+        query_executor: QueryExecutor,
+    ) -> User | None:
+        users = query_executor.fetch(FetchUsers(ids=batch.ids))
+        return users.get(owner_id)
+
+    OwnerTransformerAnnotated = build_transform_annotated(transform_owner)
+
+    class TeamDTO(BaseModel):
+        id: int
+        owner: OwnerTransformerAnnotated
+
+    rows: list[dict[str, int]] = [
+        {'id': 1, 'owner': 10},
+        {'id': 2, 'owner': 20},
+        {'id': 3, 'owner': 10},
+    ]
+
+    @app.injector.entrypoint
+    def render_page() -> list[TeamDTO]:
+        return app.executor.render(TeamDTO, rows)
+
+    results = render_page()
+
+    assert len(db_calls) == 1
+    assert db_calls[0] == frozenset({10, 20})
+    assert [r.owner for r in results] == [
+        User(id=10, name='u10'),
+        User(id=20, name='u20'),
+        User(id=10, name='u10'),
+    ]
+
+
+def test_include_router_merges_queries_and_transformers() -> None:
+    router = QueryRouter()
+
+    db_calls: list[frozenset[int]] = []
+
+    class FetchUsers(Query[dict[int, User]]):
+        ids: frozenset[int]
+
+    @router.queries
+    def fetch_users(args: FetchUsers) -> dict[int, User]:
+        db_calls.append(args.ids)
+        return {i: User(id=i, name=f'u{i}') for i in args.ids}
+
+    @router.transformer(prefetch=FetchUsers)
+    def transform_owner(
+        owner_id: int,
+        batch: BatchArg[int],
+        query_executor: QueryExecutor,
+    ) -> User | None:
+        users = query_executor.fetch(FetchUsers(ids=batch.ids))
+        return users.get(owner_id)
+
+    # build the field annotation BEFORE include_router — this captures the
+    # router's wrapped callable; include_router rewires the DI plumbing in
+    # place so the captured wrapper still works through the app's scope.
+    OwnerTransformerAnnotated = build_transform_annotated(transform_owner)
+
+    class TeamDTO(BaseModel):
+        id: int
+        owner: OwnerTransformerAnnotated
+
+    app = BFF()
+    app.include_router(router)
+
+    @app.injector.entrypoint
+    def render_page() -> list[TeamDTO]:
+        return app.executor.render(TeamDTO, [{'id': 1, 'owner': 10}, {'id': 2, 'owner': 20}])
+
+    results = render_page()
+
+    assert len(db_calls) == 1
+    assert db_calls[0] == frozenset({10, 20})
+    assert results[0].owner == User(id=10, name='u10')
+    assert results[1].owner == User(id=20, name='u20')
+
+
+def test_include_router_raises_on_duplicate_query_type() -> None:
+    class FetchUsers(Query[dict[int, User]]):
+        ids: frozenset[int]
+
+    router = QueryRouter()
+
+    @router.queries
+    def fetch_users(args: FetchUsers) -> dict[int, User]:
+        return {}
+
+    app = BFF()
+
+    @app.queries
+    def fetch_users_again(args: FetchUsers) -> dict[int, User]:
+        return {}
+
+    with pytest.raises(QueryRegistrationError, match='Duplicate @queries registration'):
+        app.include_router(router)
+
+
+def test_include_router_raises_on_duplicate_function() -> None:
+    router = QueryRouter()
+    app = BFF()
+
+    def fetch_users(ids: frozenset[int]) -> dict[int, User]:
+        return {}
+
+    router.queries(fetch_users)
+    with pytest.raises(QueryRegistrationError, match='Duplicate @queries registration'):
+        app.queries(fetch_users)
+        app.include_router(router)
+
+
+def test_router_dependencies_resolve_through_app_after_include() -> None:
+    """A router-registered transformer should pick up the app's bind() overrides."""
+    from pydantic_bff import dependency
+
+    @dataclass(frozen=True)
+    class Greeting:
+        message: str
+
+    @dependency
+    class Greeter:
+        def hello(self, name: str) -> Greeting:
+            return Greeting(message=f'plain hello {name}')
+
+    class StubGreeter:
+        def hello(self, name: str) -> Greeting:
+            return Greeting(message=f'stub hello {name}')
+
+    router = QueryRouter()
+
+    @router.transformer
+    def transform_name(name: str, greeter: Greeter) -> Greeting:
+        return greeter.hello(name)
+
+    GreetingTransformerAnnotated = build_transform_annotated(transform_name)
+
+    class NameDTO(BaseModel):
+        model_config = {'arbitrary_types_allowed': True}
+        greeting: GreetingTransformerAnnotated
+
+    app = BFF()
+    app.bind(Greeter, lambda: StubGreeter())
+    app.include_router(router)
+
+    @app.injector.entrypoint
+    def render_one() -> NameDTO:
+        return app.executor.render(NameDTO, [{'greeting': 'world'}])[0]
+
+    result = render_one()
+    assert result.greeting == Greeting(message='stub hello world')

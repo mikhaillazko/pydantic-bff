@@ -16,8 +16,6 @@ from typing import get_origin
 
 from fastapi.params import Depends as ParamDepends
 
-from .web_depends import WebDepends
-
 
 @cache
 def cached_signature(func: Callable) -> Signature:
@@ -60,9 +58,6 @@ def _introspect_dependencies(dependant: Dependant) -> list[Dependant]:
 
         arg_types_of_annotated = get_args(arg_param.annotation)
         annotated_metadata = arg_types_of_annotated[1:]
-
-        if any(isinstance(arg, WebDepends) for arg in annotated_metadata):
-            continue
 
         fastapi_annotations = [arg for arg in annotated_metadata if isinstance(arg, ParamDepends)]
         assert len(fastapi_annotations) <= 1, f'Cannot specify multiple `Annotated` arguments for {arg_param.name!r}'

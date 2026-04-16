@@ -7,14 +7,16 @@ from typing import Union
 from typing import get_args
 from typing import get_origin
 
-from pydantic import BaseModel as PydanticBaseModel
+from pydantic import GetCoreSchemaHandler
+from pydantic_core import core_schema
 from pydantic_core.core_schema import ValidationInfo
 
+from pydantic_bff.exceptions import BatchContextMissingError
 from pydantic_bff.injections.dependant import cached_signature
 from pydantic_bff.injections.reflection import find_arg_info
 
-_TRANSFORMER_ATTR = '__transformer__'
 _BATCHES_ATTR = '__batches__'
+_FIELD_INFO_ATTR = '_transformer_field_info'
 
 
 @dataclass
@@ -22,10 +24,18 @@ class BatchInfo:
     field_name: str
     key: str
     batch_fetch_type: Any | None = field(default=None)
+    prefetch_query: type | None = field(default=None)
 
 
-class BatchArg[T](PydanticBaseModel):
-    ids: frozenset[T]
+@dataclass(frozen=True, slots=True)
+class BatchArg[BatchKey]:
+    """Carrier for the full set of batch keys for a transformer field on the current page.
+
+    Cheap by design: a frozen, slotted dataclass — not a Pydantic model.
+    Construct directly as ``BatchArg(ids=frozenset({1, 2, 3}))``.
+    """
+
+    ids: frozenset[BatchKey]
 
 
 def _extract_value_type(return_type: type) -> type | None:
@@ -43,27 +53,42 @@ def _extract_value_type(return_type: type) -> type | None:
 
 
 def _get_batch_key_type(batch_arg_cls: type) -> type | None:
-    """Extract T from a parameterised BatchArg[T] (Pydantic generic model)."""
-    metadata = getattr(batch_arg_cls, '__pydantic_generic_metadata__', None)
-    if metadata and metadata.get('args'):
-        return metadata['args'][0]
+    """Extract ``T`` from a parameterised ``BatchArg[T]`` (typing.Generic alias)."""
+    args = get_args(batch_arg_cls)
+    if args:
+        return args[0]
     return None
 
 
-class TransformerAnnotation:
+class TransformerFieldInfo:
+    """Annotated-metadata + introspection bundle for a ``@transformer`` field.
+
+    A single object that doubles as:
+
+    * **Pydantic field metadata** — implements
+      :meth:`__get_pydantic_core_schema__` so it can be placed inside
+      ``Annotated[ReturnType, ...]`` and Pydantic will run the wrapped
+      transformer as a plain validator.
+    * **Introspection metadata** — :func:`introspect_model_transformers` looks
+      for instances of this class to discover batch fields and their prefetch
+      queries.
+    """
+
     def __init__(
         self,
-        call: Callable,
+        original_func: Callable,
+        wrapped_call: Callable,
         return_type: type,
-    ):
-        batch_arg_name, batch_arg_cls = find_arg_info(call, BatchArg)
+        prefetch_query: type | None = None,
+    ) -> None:
+        batch_arg_name, batch_arg_cls = find_arg_info(original_func, BatchArg)
         self.batch_arg_name = batch_arg_name
-        call_sign = cached_signature(call)
-        self.has_info_arg = any(
-            param_val.annotation is ValidationInfo for param_key, param_val in call_sign.parameters.items()
-        )
-        self.call = call
+        call_sign = cached_signature(original_func)
+        self.has_info_arg = any(param.annotation is ValidationInfo for param in call_sign.parameters.values())
+        self.original_func = original_func
+        self.call = wrapped_call
         self.return_type = return_type
+        self.prefetch_query = prefetch_query
         self.batch_fetch_type: type | None = None
         if batch_arg_cls is not None:
             key_type = _get_batch_key_type(batch_arg_cls)
@@ -73,8 +98,63 @@ class TransformerAnnotation:
 
     @property
     def batch_key(self) -> str | None:
-        return f'{self.call}#{self.batch_arg_name}' if self.batch_arg_name is not None else None
+        if self.batch_arg_name is None:
+            return None
+        return f'{self.original_func}#{self.batch_arg_name}'
+
+    def __get_pydantic_core_schema__(
+        self,
+        source_type: Any,
+        handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        return core_schema.with_info_plain_validator_function(
+            self._validate,
+            json_schema_input_schema=handler(source_type),
+        )
+
+    def _validate(self, value: Any, info: ValidationInfo) -> Any:
+        if _is_the_same_type(value, self.return_type):
+            return value
+
+        positional: tuple[Any, ...] = (value, info) if self.has_info_arg else (value,)
+        keyword: dict[str, Any] = {}
+        if self.batch_arg_name is not None:
+            if info.context is None:
+                raise BatchContextMissingError(
+                    f'Transformer {self.original_func.__name__!r} declares a BatchArg but no '
+                    'validation context was provided. Call '
+                    '`populate_context_with_batch(Model, rows)` (or `executor.render(Model, rows)`) '
+                    'and pass the result as `context=` to `Model.model_validate`.',
+                )
+            ids = info.context[self.batch_key]
+            keyword[self.batch_arg_name] = BatchArg(ids=frozenset(ids))
+
+        return self.call(*positional, **keyword)
 
     def __repr__(self) -> str:
-        func_name = getattr(self.call, '__name__', str(self.call))
-        return f'TransformerAnnotation({func_name}, batch_arg_name: {self.batch_arg_name})'
+        func_name = getattr(self.original_func, '__name__', str(self.original_func))
+        return f'TransformerFieldInfo({func_name}, batch_arg_name={self.batch_arg_name})'
+
+
+def _is_the_same_type(value: Any, return_type: type) -> bool:
+    if value.__class__ is return_type:
+        return True
+
+    origin_return_type = get_origin(return_type)
+    args = get_args(return_type)
+    if origin_return_type is Union or origin_return_type is builtin_types.UnionType:
+        return any(_is_the_same_type(value, arg) for arg in args)
+    if origin_return_type not in {list, set}:
+        return False
+
+    if not isinstance(value, origin_return_type):
+        return False
+
+    if len(value) == 0:
+        return True
+
+    item = next(iter(value))
+    if not args:
+        return True
+
+    return _is_the_same_type(item, args[0])

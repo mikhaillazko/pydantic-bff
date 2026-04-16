@@ -10,7 +10,7 @@ from pydantic import BaseModel as PydanticBaseModel
 
 from .types import _BATCHES_ATTR
 from .types import BatchInfo
-from .types import TransformerAnnotation
+from .types import TransformerFieldInfo
 
 
 def introspect_model_transformers(cls: type[PydanticBaseModel]) -> None:
@@ -23,26 +23,27 @@ def introspect_model_transformers(cls: type[PydanticBaseModel]) -> None:
     batches = []
     annotations = get_annotations(cls)
     for field_name, field_type in annotations.items():
-        transformer_annotation = _find_transformer_annotation(field_type)
-        if transformer_annotation and transformer_annotation.batch_key:
-            batch_info = BatchInfo(
-                field_name=field_name,
-                key=transformer_annotation.batch_key,
-                batch_fetch_type=transformer_annotation.batch_fetch_type,
+        field_info = _find_transformer_field_info(field_type)
+        if field_info and field_info.batch_key:
+            batches.append(
+                BatchInfo(
+                    field_name=field_name,
+                    key=field_info.batch_key,
+                    batch_fetch_type=field_info.batch_fetch_type,
+                    prefetch_query=field_info.prefetch_query,
+                ),
             )
-            batches.append(batch_info)
 
-    if batches:
-        setattr(cls, _BATCHES_ATTR, batches)
+    setattr(cls, _BATCHES_ATTR, batches)
 
 
-def _find_transformer_annotation(field_type: type) -> TransformerAnnotation | None:
+def _find_transformer_field_info(field_type: type) -> TransformerFieldInfo | None:
     metadata = _find_all_nested_annotations(field_type)
-    transformer_annotations = [item for item in metadata if isinstance(item, TransformerAnnotation)]
-    if not transformer_annotations:
+    field_infos = [item for item in metadata if isinstance(item, TransformerFieldInfo)]
+    if not field_infos:
         return None
-    assert len(transformer_annotations) == 1, transformer_annotations
-    return transformer_annotations[0]
+    assert len(field_infos) == 1, field_infos
+    return field_infos[0]
 
 
 def _find_all_nested_annotations(_type: type) -> list[Any]:
@@ -54,24 +55,16 @@ def _find_all_nested_annotations(_type: type) -> list[Any]:
         args = get_args(_type)
         base_type = args[0]
         for meta in args[1:]:
-            # When the user-supplied metadata is itself an Annotated alias
-            # (as produced by build_transform_annotated), Python does not
-            # flatten the outer Annotated into the inner one when the base
-            # types do not match by identity, so recurse into it explicitly.
+            # When user-supplied metadata is itself an Annotated alias, recurse
+            # into it explicitly — Python does not flatten the outer Annotated
+            # into the inner one if the base types do not match by identity.
             if get_origin(meta) is Annotated:
                 annotations.extend(_find_all_nested_annotations(meta))
             else:
                 annotations.append(meta)
-        # Recurse on the base type
         annotations.extend(_find_all_nested_annotations(base_type))
-    elif origin in (Union, Optional):
-        # For Union or Optional, recurse on all argument types
+    elif origin in (Union, Optional) or get_args(_type):
         for arg in get_args(_type):
             annotations.extend(_find_all_nested_annotations(arg))
-    elif get_args(_type):
-        # For other generic types (e.g., list), recurse on parameters
-        for arg in get_args(_type):
-            annotations.extend(_find_all_nested_annotations(arg))
-    # Simple types (e.g., int, NoneType) have no annotations
 
     return annotations

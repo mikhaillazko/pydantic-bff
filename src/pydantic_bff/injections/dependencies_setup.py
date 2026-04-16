@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
 
+from pydantic_bff.exceptions import DependencyOverrideError
+
 
 @dataclass
 class DependenciesSetup:
@@ -16,12 +18,19 @@ class DependenciesSetup:
         self._items.append(item)
 
     def override(self, interface: Callable[..., Any], interface_impl: Callable[..., Any]) -> None:
+        """Replace the existing implementation for *interface*.
+
+        Raises :class:`DependencyOverrideError` if *interface* has not been
+        registered yet — silently inserting a new entry on a typo would defeat
+        the point of an explicit override API.
+        """
         for idx, (original, _) in enumerate(self._items):
             if original is interface:
                 self._items[idx] = (interface, interface_impl)
-                break
-        else:
-            self.register(interface, interface_impl)
+                return
+        raise DependencyOverrideError(
+            f'Cannot override {interface!r}: not registered. Call register() first.',
+        )
 
     def clone(self) -> 'DependenciesSetup':
         return DependenciesSetup(_items=self._items.copy())

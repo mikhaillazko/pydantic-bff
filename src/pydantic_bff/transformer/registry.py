@@ -1,86 +1,144 @@
-import types
 from collections.abc import Callable
 from functools import lru_cache
+from typing import Annotated
 from typing import Any
-from typing import Union
 from typing import get_args
 from typing import get_origin
 from typing import get_type_hints
 
-from pydantic_core.core_schema import ValidationInfo
-
+from pydantic_bff.exceptions import TransformerRegistrationError
 from pydantic_bff.injections.registry import IInjectorRegistry
 
-from .types import _TRANSFORMER_ATTR
-from .types import BatchArg
-from .types import TransformerAnnotation
+from .types import _FIELD_INFO_ATTR
+from .types import TransformerFieldInfo
 
 
 class TransformerRegistry:
+    """Decorator factory: ``@transformer`` registers a function as a transformer.
+
+    The decorator returns the original function unchanged, with a
+    :class:`TransformerFieldInfo` attached at ``func._transformer_field_info``.
+    Use :func:`build_transform_annotated` to build a Pydantic-ready
+    ``Annotated[ReturnType, TransformerFieldInfo]`` alias; bind it to a
+    PascalCase ``<Name>TransformerAnnotated`` name and use it directly as a
+    field type::
+
+        @transformer
+        def transform_owner(owner_id: int, query_executor: QueryExecutor) -> User: ...
+
+        OwnerTransformerAnnotated = build_transform_annotated(transform_owner)
+
+        class TeamDTO(BaseModel):
+            owner: OwnerTransformerAnnotated
+    """
+
     def __init__(self, injector: IInjectorRegistry) -> None:
         self._injector = injector
-        self._transformer_map: dict[Callable, TransformerAnnotation] = {}
 
-    def __call__(self, func: Callable) -> Callable:
-        return self._register(func)
+    def __call__(self, func: Callable | None = None, *, prefetch: type | None = None) -> Any:
+        """Register a transformer.
 
-    def _register(self, func: Callable) -> Callable:
+        Two equivalent forms::
+
+            @transformer
+            def transform_owner(...): ...
+
+            @transformer(prefetch=FetchUsers)
+            def transform_owner(..., batch: BatchArg[int], ...): ...
+
+        ``prefetch`` is a :class:`Query` subclass (or registered ``@queries``
+        function) to be invoked once per page with the collected batch ids.
+        Required only if you call ``executor.render(Model, rows)`` and want
+        Phase 2 to be automatic; omit it if you orchestrate prefetch yourself.
+        """
+        if func is None:
+            return lambda f: self._register(f, prefetch=prefetch)
+        return self._register(func, prefetch=prefetch)
+
+    def _register[F: Callable](self, func: F, *, prefetch: type | None) -> F:
         hints = get_type_hints(func)
         return_type = hints.get('return')
         if return_type is None:
-            raise TypeError(f'Transformer {func.__name__!r} must have a return type annotation')
-        wrapped_transformer = self._injector.inject(func)
-        annotation = TransformerAnnotation(call=wrapped_transformer, return_type=return_type)
+            raise TransformerRegistrationError(
+                f'Transformer {func.__name__!r} must have a return type annotation.',
+            )
+        wrapped_call = self._injector.inject(func)
+        field_info = TransformerFieldInfo(
+            original_func=func,
+            wrapped_call=wrapped_call,
+            return_type=return_type,
+            prefetch_query=prefetch,
+        )
+        setattr(func, _FIELD_INFO_ATTR, field_info)
+        return func
 
-        # follow pydantic validator signature -> any_plain_validator_func(val: Any, info: ValidationInfo)
-        def plain_validator_decorator(val: Any, info: ValidationInfo) -> Any:
-            if _is_the_same_type(val, annotation.return_type):
-                return val
 
-            args = (val, info) if annotation.has_info_arg else (val,)
-            kwargs = {}
-            if annotation.batch_arg_name is not None:
-                if info.context is None:
-                    raise RuntimeError(
-                        f'Transformer {annotation!r} uses BatchArg but no context was provided. '
-                        'Call populate_context_with_batch before validation.',
-                    )
-                ids = info.context[annotation.batch_key]
-                kwargs[annotation.batch_arg_name] = BatchArg(ids=ids)
+def build_transform_annotated(func: Callable) -> Any:
+    """Return an ``Annotated[ReturnType, TransformerFieldInfo]`` alias for *func*.
 
-            return wrapped_transformer(*args, **kwargs)
+    The result is a Pydantic-ready type alias usable directly as a field type
+    on a Pydantic model. Bind it to a PascalCase
+    ``<Name>TransformerAnnotated`` name to signal that it is a type alias::
 
-        self._transformer_map[plain_validator_decorator] = annotation
-        setattr(plain_validator_decorator, _TRANSFORMER_ATTR, annotation)
-        return plain_validator_decorator
+        @transformer
+        def transform_owner(owner_id: int) -> User | None: ...
+
+        OwnerTransformerAnnotated = build_transform_annotated(transform_owner)
+
+        class TeamDTO(BaseModel):
+            owner: OwnerTransformerAnnotated
+
+    The return type baked into the alias is exactly the function's declared
+    return type — including ``Optional``, ``list[...]``, etc.
+
+    Raises :class:`TransformerRegistrationError` if *func* was never registered
+    via ``@transformer``.
+    """
+    field_info = getattr(func, _FIELD_INFO_ATTR, None)
+    if not isinstance(field_info, TransformerFieldInfo):
+        func_name = getattr(func, '__name__', repr(func))
+        raise TransformerRegistrationError(
+            f'{func_name!r} is not a registered @transformer — '
+            'decorate it with @transformer before calling build_transform_annotated().',
+        )
+    return Annotated[field_info.return_type, field_info]
+
+
+def transformer_callable(func_or_field: Any) -> Callable | None:
+    """Return the DI-wrapped underlying callable for a ``@transformer`` function.
+
+    Accepts either the registered function itself or an
+    ``Annotated[T, build_transform_annotated(func)]`` alias::
+
+        @transformer
+        def transform_owner(owner_id: int) -> User: ...
+
+        call = transformer_callable(transform_owner)
+        assert call(owner_id=1) == User(id=1, name='...')
+    """
+    field_info = transformer_metadata(func_or_field)
+    return field_info.call if field_info is not None else None
+
+
+def transformer_metadata(func_or_field: Any) -> TransformerFieldInfo | None:
+    """Return the :class:`TransformerFieldInfo` for a transformer or field annotation.
+
+    Accepts either the original ``@transformer``-decorated function (the
+    metadata is read off ``func._transformer_field_info``) or an
+    ``Annotated[ReturnType, TransformerFieldInfo]`` alias.
+    """
+    direct = getattr(func_or_field, _FIELD_INFO_ATTR, None)
+    if isinstance(direct, TransformerFieldInfo):
+        return direct
+    if isinstance(func_or_field, TransformerFieldInfo):
+        return func_or_field
+    if get_origin(func_or_field) is Annotated:
+        for meta in get_args(func_or_field)[1:]:
+            if isinstance(meta, TransformerFieldInfo):
+                return meta
+    return None
 
 
 @lru_cache
 def get_transformer_registry(injector_registry: IInjectorRegistry) -> TransformerRegistry:
     return TransformerRegistry(injector_registry)
-
-
-def _is_the_same_type(val: Any, return_type: type) -> bool:
-    if val.__class__ == return_type:
-        return True
-
-    origin_return_type = get_origin(return_type)
-    args = get_args(return_type)
-    if origin_return_type == Union or origin_return_type == types.UnionType:
-        return any(_is_the_same_type(val, arg) for arg in args)
-    if origin_return_type not in {list, set}:
-        return False
-
-    if not isinstance(val, origin_return_type):
-        return False
-
-    if len(val) == 0:
-        return True
-
-    item = next(iter(val))
-    args = get_args(return_type)
-
-    if not args:
-        return True
-
-    return _is_the_same_type(item, args[0])

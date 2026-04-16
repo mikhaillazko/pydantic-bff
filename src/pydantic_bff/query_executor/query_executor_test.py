@@ -216,3 +216,38 @@ def test_fetch_absent_id_becomes_present_in_new_executor(query_registry, query_e
 
     # Assert
     assert len(call_args) == 2
+
+
+# ---------------------------------------------------------------------------
+# call() — function-signature dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_call_function_signature_caches_call_level(query_registry, query_executor) -> None:
+    spy = MagicMock(side_effect=lambda key: PlainResult(value=key))
+
+    @query_registry
+    def fetch_plain(key: str) -> PlainResult:
+        return spy(key)
+
+    a = query_executor.call(fetch_plain, key='a')
+    b = query_executor.call(fetch_plain, key='a')
+
+    assert a == b == PlainResult(value='a')
+    spy.assert_called_once()
+
+
+def test_call_function_signature_entity_cache_dedupes(query_registry, query_executor) -> None:
+    spy = MagicMock(side_effect=lambda ids: {i: Entity(value=f'e:{i}') for i in ids})
+
+    @query_registry
+    def fetch_entities(ids: frozenset[int]) -> dict[int, Entity]:
+        return spy(ids)
+
+    query_executor.call(fetch_entities, ids=frozenset({1, 2, 3}))
+    spy.reset_mock()
+
+    result = query_executor.call(fetch_entities, ids=frozenset({2, 3, 4}))
+
+    assert set(result.keys()) == {2, 3, 4}
+    spy.assert_called_once_with(frozenset({4}))

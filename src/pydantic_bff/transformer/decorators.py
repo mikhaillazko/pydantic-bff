@@ -4,24 +4,23 @@ from .inspection import introspect_model_transformers
 
 
 def bff_model[T: type[PydanticBaseModel]](cls: T) -> T:
-    """Class decorator that enables batch-transformer introspection on *cls*.
+    """Optional eager-introspection decorator.
 
-    Inspects the model's annotations for fields whose metadata includes a
-    :class:`TransformerAnnotation` with a ``BatchArg`` parameter, and caches
-    the batching metadata on the class so that
-    :func:`populate_context_with_batch` can populate a validation context
-    for them. Silently no-ops for models without any batchable fields.
+    ``populate_context_with_batch`` (and therefore ``executor.render``) will
+    introspect a model on first use, so this decorator is not required. Use it
+    when you want introspection cost paid at import time, or to make the
+    intent explicit at the model definition::
 
-    Usage::
-
-        from pydantic import BaseModel
-        from pydantic_bff import bff_model
+        owner_field = build_transform_annotated(transform_owner)
 
         @bff_model
         class TeamDTO(BaseModel):
             id: int
-            users: Annotated[list[UserDTO], UserBatchTransformer]
+            owner: Annotated[User, owner_field]
+
+    Raises ``TypeError`` if applied to a non-Pydantic class.
     """
-    assert issubclass(cls, PydanticBaseModel), f'@bff_model expects a Pydantic BaseModel subclass, got {cls!r}'
+    if not (isinstance(cls, type) and issubclass(cls, PydanticBaseModel)):
+        raise TypeError(f'@bff_model expects a Pydantic BaseModel subclass, got {cls!r}')
     introspect_model_transformers(cls)
     return cls

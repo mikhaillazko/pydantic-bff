@@ -4,8 +4,11 @@ from functools import lru_cache
 from functools import wraps
 from typing import Annotated
 from typing import Any
+from typing import get_origin
 
 from fastapi import Depends
+
+from pydantic_bff.exceptions import DependencyResolutionError
 
 from . import resolver
 from .dependant import Dependant
@@ -35,6 +38,19 @@ class InjectorRegistry:
     def dependency_context(self) -> DependencyContextManager:
         return self._dependency_context
 
+    def bind(self, target: Any, factory: Callable[..., Any]) -> None:
+        """Register *factory* as the provider for *target* within this injector.
+
+        *target* may be a plain class, an ``Annotated[Class, Depends(...)]``
+        alias (the form produced by :func:`dependency`), or any other callable
+        used as a DI key. Using ``bind`` removes the need to manually unwrap
+        ``Class.__origin__`` for ``@dependency``-decorated services::
+
+            injector.bind(QueryExecutor, lambda: shared_executor)
+        """
+        key = target.__origin__ if get_origin(target) is Annotated else target
+        self._dependency_provider.dependency_overrides[key] = factory
+
     def inject(self, func: Callable) -> Callable:
         """Wrap *func* so its ``Depends(...)`` parameters are auto-resolved.
 
@@ -54,7 +70,7 @@ class InjectorRegistry:
                 dependency_provider=self._dependency_provider,
             )
             if errors:
-                raise ValueError(errors)
+                raise DependencyResolutionError(errors)
 
             return dependant.call(*args, **kwargs, **resolved_dependencies)
 
@@ -90,7 +106,7 @@ class InjectorRegistry:
                 dependency_provider=self._dependency_provider,
             )
             if errors:
-                raise ValueError(errors)
+                raise DependencyResolutionError(errors)
             yield resolved_dependency
 
 
