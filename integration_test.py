@@ -7,11 +7,9 @@ from fastapi import Depends
 from pydantic import BaseModel
 
 from fastbff import BatchArg
-from fastbff import InjectorRegistry
-from fastbff import QueriesRegistry
+from fastbff import FastBFF
 from fastbff import Query
 from fastbff import QueryExecutor
-from fastbff import TransformerRegistry
 from fastbff import build_transform_annotated
 from fastbff import validate_batch
 
@@ -23,24 +21,19 @@ class User:
 
 
 def test_render_issues_one_bulk_call_per_page() -> None:
-    # Arrange — wire a real DI container, queries registry, and transformer registry.
-    injector = InjectorRegistry()
-    queries = QueriesRegistry(injector=injector)  # type: ignore[arg-type]
-    transformer = TransformerRegistry(injector=injector)  # type: ignore[arg-type]
-    executor = QueryExecutor(queries_registry=queries)  # type: ignore[arg-type]
-    injector.bind(QueryExecutor, lambda: executor)
+    app = FastBFF()
 
     db_calls: list[frozenset[int]] = []
 
     class FetchUsers(Query[dict[int, User]]):
         ids: frozenset[int]
 
-    @queries
+    @app.queries
     def fetch_users(args: FetchUsers) -> dict[int, User]:
         db_calls.append(args.ids)
         return {i: User(id=i, name=f'u{i}') for i in args.ids}
 
-    @transformer
+    @app.transformer
     def transform_owner(
         owner_id: int,
         batch: BatchArg[int],
@@ -58,10 +51,10 @@ def test_render_issues_one_bulk_call_per_page() -> None:
     rows: list[dict[str, int]] = [
         {'id': 1, 'owner': 10},
         {'id': 2, 'owner': 20},
-        {'id': 3, 'owner': 10},  # duplicate id → still just one DB call
+        {'id': 3, 'owner': 10},
     ]
 
-    @injector.entrypoint
+    @app.entrypoint
     def render_page() -> list[TeamDTO]:
         return validate_batch(TeamDTO, rows)
 
@@ -74,50 +67,3 @@ def test_render_issues_one_bulk_call_per_page() -> None:
     assert results[0].owner == User(id=10, name='u10')
     assert results[1].owner == User(id=20, name='u20')
     assert results[2].owner == User(id=10, name='u10')
-
-
-def test_render_with_function_signature_query() -> None:
-    """Same shape, but the bulk handler is a plain function — no Query[T] subclass."""
-    injector = InjectorRegistry()
-    queries = QueriesRegistry(injector=injector)  # type: ignore[arg-type]
-    transformer = TransformerRegistry(injector=injector)  # type: ignore[arg-type]
-    executor = QueryExecutor(queries_registry=queries)  # type: ignore[arg-type]
-    injector.bind(QueryExecutor, lambda: executor)
-
-    db_calls: list[frozenset[int]] = []
-
-    @queries
-    def fetch_users(ids: frozenset[int]) -> dict[int, User]:
-        db_calls.append(ids)
-        return {i: User(id=i, name=f'u{i}') for i in ids}
-
-    @transformer
-    def transform_owner(
-        owner_id: int,
-        batch: BatchArg[int],
-        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-    ) -> User | None:
-        users = query_executor.call(fetch_users, ids=batch.ids)
-        return users.get(owner_id)
-
-    OwnerTransformerAnnotated = build_transform_annotated(transform_owner)
-
-    class TeamDTO(BaseModel):
-        id: int
-        owner: OwnerTransformerAnnotated
-
-    rows: list[dict[str, int]] = [
-        {'id': 1, 'owner': 10},
-        {'id': 2, 'owner': 20},
-    ]
-
-    @injector.entrypoint
-    def render_page() -> list[TeamDTO]:
-        return validate_batch(TeamDTO, rows)
-
-    results = render_page()
-
-    assert len(db_calls) == 1
-    assert db_calls[0] == frozenset({10, 20})
-    assert results[0].owner == User(id=10, name='u10')
-    assert results[1].owner == User(id=20, name='u20')

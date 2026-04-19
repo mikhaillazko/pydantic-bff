@@ -2,9 +2,9 @@ from typing import Any
 from typing import cast
 
 from .query import Query
+from .query_annotation import QueryAnnotation
 from .query_cache import MISSING
 from .query_executor import QueryExecutor
-from .registry import IQueriesRegistry
 
 
 class QueryExecutorMock(QueryExecutor):
@@ -12,8 +12,8 @@ class QueryExecutorMock(QueryExecutor):
     un-stubbed queries fall through to the real :class:`QueryExecutor`.
     """
 
-    def __init__(self, queries_registry: IQueriesRegistry) -> None:
-        super().__init__(queries_registry)
+    def __init__(self, query_annotations: dict[type, QueryAnnotation]) -> None:
+        super().__init__(query_annotations)
         self._query_stubs: dict[type, Any] = {}
 
     def stub_query[T](self, query_type: type[Query[T]], return_value: T) -> None:

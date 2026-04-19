@@ -18,7 +18,7 @@ Composition
 - :class:`BatchArg` — marker parameter type for batch-aware transformers.
 - :func:`build_transform_annotated` — build the ``Annotated[...]`` metadata
   for a ``@transformer``-registered function.
-- :class:`TransformerFieldInfo` — the metadata object placed inside
+- :class:`TransformerAnnotation` — the metadata object placed inside
   ``Annotated[ReturnType, ...]`` (returned by ``build_transform_annotated``).
 
 Queries
@@ -26,7 +26,6 @@ Queries
 - :class:`Query` — typed query object (``Query[T]``).
 - :class:`QueryExecutor` — per-request dispatcher with call-level and
   entity-level caching.
-- :class:`QueriesRegistry` — ``@queries`` decorator factory.
 - :class:`QueryExecutorMock` — test double for stubbing queries.
 
 Dependency injection
@@ -58,11 +57,9 @@ from .injections.dependencies_setup import DependenciesSetup
 from .injections.dependency_provider import DependencyProvider
 from .injections.registry import InjectorRegistry
 from .injections.registry import get_injector_registry
-from .query_executor.mock import QueryExecutorMock
 from .query_executor.query import Query
 from .query_executor.query_executor import QueryExecutor
-from .query_executor.registry import QueriesRegistry
-from .query_executor.registry import get_queries_registry
+from .query_executor.query_executor_mock import QueryExecutorMock
 from .router import QueryRouter
 from .transformer.registry import TransformerRegistry
 from .transformer.registry import build_transform_annotated
@@ -70,7 +67,7 @@ from .transformer.registry import get_transformer_registry
 from .transformer.registry import transformer_callable
 from .transformer.registry import transformer_metadata
 from .transformer.types import BatchArg
-from .transformer.types import TransformerFieldInfo
+from .transformer.types import TransformerAnnotation
 
 __all__ = [
     # App / Router
@@ -80,16 +77,14 @@ __all__ = [
     'BatchArg',
     'validate_batch',
     # Queries
-    'QueriesRegistry',
     'Query',
     'QueryExecutor',
     'QueryExecutorMock',
-    'get_queries_registry',
     # DI
     'DependenciesSetup',
     'DependencyProvider',
     'InjectorRegistry',
-    'TransformerFieldInfo',
+    'TransformerAnnotation',
     'TransformerRegistry',
     'build_transform_annotated',
     'get_injector_registry',

@@ -7,6 +7,8 @@ from typing import get_args
 from typing import get_origin
 from typing import get_type_hints
 
+from fastbff.exceptions import QueryRegistrationError
+
 from .query import Query
 
 
@@ -79,7 +81,12 @@ class QueryAnnotation:
         self.call = call
         self.original_func = original_func
         hints = get_type_hints(original_func)
-        self.return_type: type | None = hints.get('return')
+        return_type = hints.get('return')
+        if return_type is None:
+            raise QueryRegistrationError(
+                f'@query {original_func.__name__!r}: handler must declare a return type annotation.',
+            )
+        self.return_type: type = return_type
 
         # Detect Query[T] parameter
         self.query_type: type | None = None
@@ -89,14 +96,21 @@ class QueryAnnotation:
                 continue
             if _is_query_subclass(param_type):
                 if self.query_type is not None:
-                    func_name = getattr(original_func, '__name__', str(original_func))
                     raise TypeError(
-                        f'@query {func_name}: multiple Query parameters '
+                        f'@query {original_func.__name__}: multiple Query parameters '
                         f'({self.query_param_name}: {self.query_type.__name__}, '
                         f'{param_name}: {param_type.__name__})',
                     )
                 self.query_type = param_type
                 self.query_param_name = param_name
+
+        if self.query_type is not None:
+            expected_return = extract_query_return_type(self.query_type)
+            if expected_return is not None and self.return_type != expected_return:
+                raise QueryRegistrationError(
+                    f'@query {original_func.__name__}: return type {self.return_type} '
+                    f'does not match {self.query_type.__name__}[{expected_return}]',
+                )
 
         # Pre-compute dict[K, V] metadata; None if return type is not a dict.
         self.dict_value_type: Any = None

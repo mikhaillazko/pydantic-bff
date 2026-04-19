@@ -86,7 +86,7 @@ class TeamDTO(BaseModel):
 
 # --- Handler ---------------------------------------------------------------
 
-@app.injector.entrypoint
+@app.entrypoint
 def render_teams_page() -> list[TeamDTO]:
     rows = [
         {'id': 1, 'owner': 10},
@@ -132,22 +132,7 @@ def fetch_users(args: FetchUsers) -> dict[int, User]:
 Return-type mismatches raise `QueryRegistrationError` at registration time, not at
 runtime.
 
-### Function-signature queries
-
-If you don't want a `Query[T]` subclass per call, register a plain typed function and
-dispatch via `app.executor.call`:
-
-```python
-@app.queries
-def fetch_users(ids: frozenset[int]) -> dict[int, User]:
-    ...
-
-users = app.executor.call(fetch_users, ids=frozenset({1, 2, 3}))
-```
-
-The same call-level + entity-level caches apply.
-
-### `QueryExecutor.fetch` / `QueryExecutor.call`
+### `QueryExecutor.fetch`
 
 Per-request dispatcher with two caching layers:
 
@@ -165,7 +150,7 @@ each request gets a fresh `QueryExecutor` automatically.
 A transformer is a plain function with a return type annotation. `@app.transformer`
 registers it and returns the function unchanged — directly callable in tests. Use
 `build_transform_annotated(func)` to build a Pydantic-ready
-`Annotated[ReturnType, TransformerFieldInfo]` alias; bind it to a PascalCase
+`Annotated[ReturnType, TransformerAnnotation]` alias; bind it to a PascalCase
 `<Name>TransformerAnnotated` name and use it directly as a field type:
 
 ```python
@@ -234,7 +219,7 @@ def fetch_users(args: FetchUsers, session: DBSession) -> dict[int, User]:
     # `session: DBSession` is Annotated[Session, Depends(get_session)] elsewhere
     ...
 
-@app.injector.entrypoint
+@app.entrypoint
 def handler() -> ...:
     # `entrypoint` opens a fresh dependency scope for this call
     ...
@@ -323,48 +308,48 @@ fastapi_app = FastAPI()
 
 
 class FetchUsers(Query[dict[int, User]]):
-  ids: frozenset[int]
+    ids: frozenset[int]
 
 
 @app.queries
 def fetch_users(args: FetchUsers, session: DBSession) -> dict[int, User]:
-  stmt = select(UserRow).where(UserRow.id.in_(args.ids))
-  rows = session.execute(stmt).scalars().all()
-  return {row.id: User(id=row.id, name=row.name) for row in rows}
+    stmt = select(UserRow).where(UserRow.id.in_(args.ids))
+    rows = session.execute(stmt).scalars().all()
+    return {row.id: User(id=row.id, name=row.name) for row in rows}
 
 
 @app.transformer
 def transform_owner(
-        owner_id: int,
-        batch: BatchArg[int],
-        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
+    owner_id: int,
+    batch: BatchArg[int],
+    query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
 ) -> User | None:
-  return query_executor.fetch(FetchUsers(ids=batch.ids)).get(owner_id)
+    return query_executor.fetch(FetchUsers(ids=batch.ids)).get(owner_id)
 
 
 UserTransformerAnnotated = build_transform_annotated(transform_owner)
 
 
 class TeamDTO(BaseModel):
-  id: int
-  owner: UserTransformerAnnotated
+    id: int
+    owner: UserTransformerAnnotated
 
 
 class FetchTeams(Query[list[TeamDTO]]):
-  pass
+    pass
 
 
 @app.queries
 def fetch_teams(args: FetchTeams, session: DBSession) -> list[TeamDTO]:
-  rows = list(session.execute(select(TeamRow)).mappings().all())
-  return validate_batch(TeamDTO, rows)
+    rows = list(session.execute(select(TeamRow)).mappings().all())
+    return validate_batch(TeamDTO, rows)
 
 
 @fastapi_app.get('/teams', response_model=list[TeamDTO])
 def list_teams(
-        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
+    query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
 ) -> list[TeamDTO]:
-  return query_executor.fetch(FetchTeams())
+    return query_executor.fetch(FetchTeams())
 ```
 
 The `DBSession` alias is a plain FastAPI `Depends(...)` — fastbff's
@@ -384,7 +369,7 @@ or the injector's own `app.bind(...)`.
 ```python
 from fastbff import QueryExecutorMock
 
-mock = QueryExecutorMock(queries_registry=app.queries)
+mock = QueryExecutorMock(router=app.router)
 mock.stub_query(FetchUsers, {10: User(id=10, name='u10')})
 
 assert mock.fetch(FetchUsers(ids=frozenset({10}))) == {10: User(id=10, name='u10')}

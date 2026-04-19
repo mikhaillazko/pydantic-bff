@@ -10,7 +10,7 @@ from pydantic import BaseModel as PydanticBaseModel
 
 from .types import _BATCHES_ATTR
 from .types import BatchInfo
-from .types import TransformerFieldInfo
+from .types import TransformerAnnotation
 
 
 def introspect_model_transformers(cls: type[PydanticBaseModel]) -> None:
@@ -23,26 +23,26 @@ def introspect_model_transformers(cls: type[PydanticBaseModel]) -> None:
     batches = []
     annotations = get_annotations(cls)
     for field_name, field_type in annotations.items():
-        field_info = _find_transformer_field_info(field_type)
-        if field_info and field_info.batch_key:
+        transformer_annotation = _find_transformer_annotation(field_type)
+        if transformer_annotation and transformer_annotation.batch_key:
             batches.append(
                 BatchInfo(
                     field_name=field_name,
-                    key=field_info.batch_key,
-                    batch_fetch_type=field_info.batch_fetch_type,
+                    key=transformer_annotation.batch_key,
+                    batch_fetch_type=transformer_annotation.batch_fetch_type,
                 ),
             )
 
     setattr(cls, _BATCHES_ATTR, batches)
 
 
-def _find_transformer_field_info(field_type: type) -> TransformerFieldInfo | None:
+def _find_transformer_annotation(field_type: type) -> TransformerAnnotation | None:
     metadata = _find_all_nested_annotations(field_type)
-    field_infos = [item for item in metadata if isinstance(item, TransformerFieldInfo)]
-    if not field_infos:
+    transformer_annotations = [item for item in metadata if isinstance(item, TransformerAnnotation)]
+    if not transformer_annotations:
         return None
-    assert len(field_infos) == 1, field_infos
-    return field_infos[0]
+    assert len(transformer_annotations) == 1, transformer_annotations
+    return transformer_annotations[0]
 
 
 def _find_all_nested_annotations(_type: type) -> list[Any]:

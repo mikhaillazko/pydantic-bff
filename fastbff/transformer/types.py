@@ -6,17 +6,19 @@ from typing import Any
 from typing import Union
 from typing import get_args
 from typing import get_origin
+from typing import get_type_hints
 
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import core_schema
 from pydantic_core.core_schema import ValidationInfo
 
 from fastbff.exceptions import BatchContextMissingError
+from fastbff.exceptions import TransformerRegistrationError
 from fastbff.injections.dependant import cached_signature
 from fastbff.injections.reflection import find_arg_info
 
 _BATCHES_ATTR = '__batches__'
-_FIELD_INFO_ATTR = '_transformer_field_info'
+_TRANSFORMER_ANNOTATION_ATTR = '_transformer_annotation'
 
 
 @dataclass
@@ -59,7 +61,7 @@ def _get_batch_key_type(batch_arg_cls: type) -> type | None:
     return None
 
 
-class TransformerFieldInfo:
+class TransformerAnnotation:
     """Annotated-metadata + introspection bundle for a ``@transformer`` field.
 
     A single object that doubles as:
@@ -76,8 +78,12 @@ class TransformerFieldInfo:
         self,
         original_func: Callable,
         wrapped_call: Callable,
-        return_type: type,
     ) -> None:
+        return_type = get_type_hints(original_func).get('return')
+        if return_type is None:
+            raise TransformerRegistrationError(
+                f'Transformer {original_func.__name__!r} must have a return type annotation.',
+            )
         batch_arg_name, batch_arg_cls = find_arg_info(original_func, BatchArg)
         self.batch_arg_name = batch_arg_name
         call_sign = cached_signature(original_func)
@@ -128,7 +134,7 @@ class TransformerFieldInfo:
 
     def __repr__(self) -> str:
         func_name = getattr(self.original_func, '__name__', str(self.original_func))
-        return f'TransformerFieldInfo({func_name}, batch_arg_name={self.batch_arg_name})'
+        return f'TransformerAnnotation({func_name}, batch_arg_name={self.batch_arg_name})'
 
 
 def _is_the_same_type(value: Any, return_type: type) -> bool:

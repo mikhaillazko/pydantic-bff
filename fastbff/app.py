@@ -1,5 +1,5 @@
-"""Top-level :class:`FastBFF` app — wires the queries registry, transformer registry,
-DI container, and a per-process :class:`QueryExecutor` together.
+"""Top-level :class:`FastBFF` app — owns the DI injector, a :class:`QueryRouter`
+carrier, and the query-type lookup table consulted by :class:`QueryExecutor`.
 
 Mirrors FastAPI's ``app = FastAPI(); app.include_router(router)`` ergonomics so
 multi-module projects can register handlers locally and merge them into a
@@ -9,20 +9,21 @@ single composition root.
 from collections.abc import Callable
 from typing import Any
 
+from .exceptions import QueryNotRegisteredError
 from .exceptions import QueryRegistrationError
 from .injections.registry import InjectorRegistry
+from .query_executor.query_annotation import QueryAnnotation
 from .query_executor.query_executor import QueryExecutor
-from .query_executor.registry import QueriesRegistry
 from .router import QueryRouter
-from .transformer.registry import TransformerRegistry
 
 
 class FastBFF:
     """Composition root for a fastbff application.
 
-    Wires the four moving parts (DI container, queries registry, transformer
-    registry, executor) so that user code only has to register handlers and
-    call :func:`validate_batch`::
+    Owns an :class:`InjectorRegistry` and a :class:`QueryRouter` carrier.
+    ``@app.queries`` / ``@app.transformer`` register on the router and then
+    upgrade the stored ``call`` to an injector-wrapped callable so ``Depends``
+    parameters resolve through the app's DI graph::
 
         app = FastBFF()
 
@@ -36,81 +37,79 @@ class FastBFF:
         app.include_router(router)
 
         results = validate_batch(TeamDTO, rows)
-
-    All four collaborators are exposed as properties (``injector``,
-    ``queries``, ``transformer``, ``executor``) so advanced callers can wire
-    additional integrations (e.g., FastAPI ``app.dependency_overrides``).
     """
 
     def __init__(self) -> None:
         self._injector = InjectorRegistry()
-        self._queries = QueriesRegistry(injector=self._injector)  # type: ignore[arg-type]
-        self._transformer = TransformerRegistry(injector=self._injector)  # type: ignore[arg-type]
-        self._executor = QueryExecutor(queries_registry=self._queries)
-        self._injector.bind(QueryExecutor, lambda: self._executor)
+        self._router = QueryRouter()
+        self._query_annotations: dict[type, QueryAnnotation] = {}
+        self._injector.bind(QueryExecutor, lambda: QueryExecutor(query_annotations=self._query_annotations))
+
+    def queries[F: Callable](self, func: F) -> F:
+        """Register *func* as a ``@query`` handler, wrapping it with the app's injector."""
+        self._router.queries(func)
+        annotation = self._router._query_func_annotations_registry[func]
+        annotation.call = self._injector.inject(func)
+        if annotation.query_type is not None:
+            if annotation.query_type in self._query_annotations:
+                raise QueryRegistrationError(
+                    f'Duplicate @queries registration for query type {annotation.query_type.__name__!r}.',
+                )
+            self._query_annotations[annotation.query_type] = annotation
+        return func
+
+    def transformer[F: Callable](self, func: F) -> F:
+        """Register *func* as a ``@transformer``, wrapping it with the app's injector."""
+        self._router.transformer(func)
+        self._router._transformer_func_annotation_registry[func].call = self._injector.inject(func)
+        return func
 
     @property
-    def injector(self) -> InjectorRegistry:
-        return self._injector
-
-    @property
-    def queries(self) -> QueriesRegistry:
-        """The app's :class:`QueriesRegistry` — usable as the ``@app.queries`` decorator."""
-        return self._queries
-
-    @property
-    def transformer(self) -> TransformerRegistry:
-        """The app's :class:`TransformerRegistry` — usable as the ``@app.transformer`` decorator."""
-        return self._transformer
-
-    @property
-    def executor(self) -> QueryExecutor:
-        """The app's process-wide :class:`QueryExecutor`.
-
-        For request-scoped use under FastAPI, annotate handler parameters as
-        ``Annotated[QueryExecutor, Depends(QueryExecutor)]`` so each HTTP
-        request gets a fresh instance with a fresh cache.
-        """
-        return self._executor
+    def router(self) -> QueryRouter:
+        """The app's underlying :class:`QueryRouter` (query + transformer storage)."""
+        return self._router
 
     def bind(self, target: Any, factory: Callable[..., Any]) -> None:
         """Shortcut for :meth:`InjectorRegistry.bind` against the app's injector."""
         self._injector.bind(target, factory)
 
+    def entrypoint[F: Callable](self, func: F) -> F:
+        """Shortcut for :meth:`InjectorRegistry.entrypoint` against the app's injector."""
+        return self._injector.entrypoint(func)  # type: ignore[return-value]
+
+    def get_annotation_by_query_type(self, query_type: type) -> QueryAnnotation:
+        annotation = self._query_annotations.get(query_type)
+        if annotation is not None:
+            return annotation
+        raise QueryNotRegisteredError(f'No @query registered for query object {query_type}')
+
     def include_router(self, router: QueryRouter) -> None:
-        """Merge a :class:`QueryRouter`'s registrations into this app.
+        """Merge *router*'s registrations into this app.
 
-        After include:
-
-        * Every query registered on *router* is also looked up on the app's
-          :class:`QueriesRegistry`, so ``app.executor.fetch(...)`` /
-          ``app.executor.call(...)`` works against router-registered handlers.
-        * The router's :class:`InjectorRegistry` is rewired to share the app's
-          DI provider and context, so router-wrapped callables resolve their
-          dependencies through the app's overrides at runtime — no need to
-          rebuild any field info captured by ``build_transform_annotated``.
+        Upgrades each stored ``QueryAnnotation.call`` / ``TransformerAnnotation.call``
+        to an injector-wrapped callable in-place, so any references captured
+        before include (e.g. via :func:`build_transform_annotated`) pick up
+        the app's DI resolution automatically.
 
         Raises :class:`QueryRegistrationError` on duplicate registration of the
         same :class:`Query` subclass or function.
         """
-        for query_type, annotation in router._queries._query_annotations.items():
-            if query_type in self._queries._query_annotations:
-                raise QueryRegistrationError(
-                    f'Duplicate @queries registration for query type {query_type.__name__!r} '
-                    f'when including router into FastBFF app.',
-                )
-            self._queries._query_annotations[query_type] = annotation
-        for func, annotation in router._queries._func_annotations.items():
-            if func in self._queries._func_annotations:
+        for func, annotation in router._query_func_annotations_registry.items():
+            if func in self._router._query_func_annotations_registry:
                 raise QueryRegistrationError(
                     f'Duplicate @queries registration for function {func.__name__!r} '
                     f'when including router into FastBFF app.',
                 )
-            self._queries._func_annotations[func] = annotation
+            if annotation.query_type is not None:
+                if annotation.query_type in self._query_annotations:
+                    raise QueryRegistrationError(
+                        f'Duplicate @queries registration for query type {annotation.query_type.__name__!r} '
+                        f'when including router into FastBFF app.',
+                    )
+                self._query_annotations[annotation.query_type] = annotation
+            annotation.call = self._injector.inject(func)
+            self._router._query_func_annotations_registry[func] = annotation
 
-        # Rewire router's DI plumbing to the app's. Wrapped callables captured
-        # by transformer field info reference the router's InjectorRegistry
-        # through closure on `self`, so swapping the *attributes* on that
-        # instance propagates the change to every already-wrapped callable.
-        router._injector._dependency_provider = self._injector._dependency_provider
-        router._injector._dependency_context = self._injector._dependency_context
+        for func, transformer_annotation in router._transformer_func_annotation_registry.items():
+            transformer_annotation.call = self._injector.inject(func)
+            self._router._transformer_func_annotation_registry[func] = transformer_annotation

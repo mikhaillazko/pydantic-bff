@@ -1,13 +1,17 @@
-"""Local registries for staged registration prior to attaching to a :class:`FastBFF` app.
+"""Carrier for pending query / transformer registrations.
 
-Mirrors FastAPI's :class:`fastapi.APIRouter` ergonomics: register your
-``@router.queries`` and ``@router.transformer`` decorators against a router,
-then attach the whole bundle to an app via :meth:`FastBFF.include_router`.
+A :class:`QueryRouter` gathers functions with their type metadata but does
+*not* wrap them with any DI injector. Wrapping is deferred until the router
+is merged into a :class:`FastBFF` app via :meth:`FastBFF.include_router`
+(external routers) or handled inline by ``@app.queries`` / ``@app.transformer``
+on an app that owns its own :class:`QueryRouter`.
 """
 
-from .injections.registry import InjectorRegistry
-from .query_executor.registry import QueriesRegistry
-from .transformer.registry import TransformerRegistry
+from collections.abc import Callable
+
+from .query_executor.query_annotation import QueryAnnotation
+from .transformer.types import _TRANSFORMER_ANNOTATION_ATTR
+from .transformer.types import TransformerAnnotation
 
 
 class QueryRouter:
@@ -32,28 +36,27 @@ class QueryRouter:
         app = FastBFF()
         app.include_router(router)
 
-    Registrations capture the router's own :class:`InjectorRegistry`. When the
-    router is included in an app, the router's DI plumbing is swapped to share
-    the app's, so already-wrapped callables resolve dependencies through the
-    app's overrides at runtime.
+    Stored ``QueryAnnotation.call`` / ``TransformerAnnotation.call`` initially
+    point at the raw function. :meth:`FastBFF.include_router` replaces them
+    with injector-wrapped calls in-place, so any already-captured references
+    (e.g. in ``Annotated[...]`` aliases returned by
+    :func:`build_transform_annotated`) automatically pick up the app's DI
+    resolution once included.
     """
 
     def __init__(self) -> None:
-        self._injector = InjectorRegistry()
-        self._queries = QueriesRegistry(injector=self._injector)  # type: ignore[arg-type]
-        self._transformer = TransformerRegistry(injector=self._injector)  # type: ignore[arg-type]
+        self._query_func_annotations_registry: dict[Callable, QueryAnnotation] = {}
+        self._transformer_func_annotation_registry: dict[Callable, TransformerAnnotation] = {}
 
-    @property
-    def queries(self) -> QueriesRegistry:
-        """The router's :class:`QueriesRegistry` — usable as the ``@router.queries`` decorator."""
-        return self._queries
+    def queries[F: Callable](self, func: F) -> F:
+        """Register *func* as a ``@query`` handler on this router."""
+        annotation = QueryAnnotation(call=func, original_func=func)
+        self._query_func_annotations_registry[func] = annotation
+        return func
 
-    @property
-    def transformer(self) -> TransformerRegistry:
-        """The router's :class:`TransformerRegistry` — usable as the ``@router.transformer`` decorator."""
-        return self._transformer
-
-    @property
-    def injector(self) -> InjectorRegistry:
-        """The router's local :class:`InjectorRegistry`."""
-        return self._injector
+    def transformer[F: Callable](self, func: F) -> F:
+        """Register *func* as a ``@transformer`` handler on this router."""
+        transformer_annotation = TransformerAnnotation(original_func=func, wrapped_call=func)
+        setattr(func, _TRANSFORMER_ANNOTATION_ATTR, transformer_annotation)
+        self._transformer_func_annotation_registry[func] = transformer_annotation
+        return func

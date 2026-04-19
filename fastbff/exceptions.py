@@ -34,7 +34,7 @@ class QueryNotRegisteredError(FastBFFError, KeyError):
     """Raised when ``QueryExecutor.fetch`` receives a query class with no registered handler.
 
     Subclasses :class:`KeyError` for backwards compatibility with the previous
-    behaviour of :meth:`QueriesRegistry.get_annotation_by_query_type`.
+    behaviour of :meth:`QueryRouter.get_annotation_by_query_type`.
     """
 
 

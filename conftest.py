@@ -1,9 +1,11 @@
 from collections.abc import Callable
+from collections.abc import Iterator
 
 import pytest
 
+from fastbff import FastBFF
 from fastbff.query_executor.query_executor import QueryExecutor
-from fastbff.query_executor.registry import QueriesRegistry
+from fastbff.router import QueryRouter
 
 
 class NoopInjector:
@@ -19,10 +21,17 @@ def noop_injector() -> NoopInjector:
 
 
 @pytest.fixture()
-def query_registry(noop_injector: NoopInjector) -> QueriesRegistry:
-    return QueriesRegistry(injector=noop_injector)  # type: ignore[arg-type]
+def app() -> Iterator[FastBFF]:
+    fastbff_app = FastBFF()
+    with fastbff_app._injector.dependency_context.init_context():
+        yield fastbff_app
 
 
 @pytest.fixture()
-def query_executor(query_registry: QueriesRegistry) -> QueryExecutor:
-    return QueryExecutor(queries_registry=query_registry)  # type: ignore[arg-type]
+def query_router() -> QueryRouter:
+    return QueryRouter()
+
+
+@pytest.fixture()
+def query_executor(app: FastBFF) -> QueryExecutor:
+    return QueryExecutor(query_annotations=app._query_annotations)

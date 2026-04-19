@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Annotated
+from typing import Literal
 
 import pytest
 from fastapi import Depends
@@ -57,7 +58,7 @@ def test_bff_app_renders_a_transformer_field() -> None:
         {'id': 3, 'owner': 10},
     ]
 
-    @app.injector.entrypoint
+    @app.entrypoint
     def render_page() -> list[TeamDTO]:
         return validate_batch(TeamDTO, rows)
 
@@ -103,19 +104,44 @@ def test_include_router_merges_queries_and_transformers() -> None:
         id: int
         owner: OwnerTransformerAnnotated
 
+    class FetchTeams(Query[list[TeamDTO]]):
+        type: Literal['volleyball', 'football', 'basketball']
+
+    teams_by_type: dict[str, list[dict[str, int]]] = {
+        'volleyball': [
+            {'id': 1, 'owner': 10},
+            {'id': 2, 'owner': 20},
+            {'id': 3, 'owner': 10},
+        ],
+        'football': [{'id': 4, 'owner': 30}],
+        'basketball': [{'id': 5, 'owner': 40}],
+    }
+
+    @router.queries
+    def fetch_teams(args: FetchTeams) -> list[TeamDTO]:
+        rows = teams_by_type[args.type]
+        return validate_batch(TeamDTO, rows)
+
     app = FastBFF()
     app.include_router(router)
 
-    @app.injector.entrypoint
-    def render_page() -> list[TeamDTO]:
-        return validate_batch(TeamDTO, [{'id': 1, 'owner': 10}, {'id': 2, 'owner': 20}])
+    @app.entrypoint
+    def get_team_list(
+        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
+    ) -> list[TeamDTO]:
+        return query_executor.fetch(FetchTeams(type='volleyball'))
 
-    results = render_page()
+    # Act
+    results = get_team_list()
 
+    # Assert
     assert len(db_calls) == 1
     assert db_calls[0] == frozenset({10, 20})
-    assert results[0].owner == User(id=10, name='u10')
-    assert results[1].owner == User(id=20, name='u20')
+    assert [r.owner for r in results] == [
+        User(id=10, name='u10'),
+        User(id=20, name='u20'),
+        User(id=10, name='u10'),
+    ]
 
 
 def test_include_router_raises_on_duplicate_query_type() -> None:
@@ -185,7 +211,7 @@ def test_router_dependencies_resolve_through_app_after_include() -> None:
     app.bind(Greeter, lambda: StubGreeter())
     app.include_router(router)
 
-    @app.injector.entrypoint
+    @app.entrypoint
     def render_one() -> NameDTO:
         return validate_batch(NameDTO, [{'greeting': 'world'}])[0]
 

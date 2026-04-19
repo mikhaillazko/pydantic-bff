@@ -50,11 +50,11 @@ class FetchEntitiesQuery(Query[dict[int, Entity]]):
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_call_level_caches(query_registry, query_executor) -> None:
+def test_fetch_call_level_caches(app, query_executor) -> None:
     # Arrange
     spy = MagicMock(side_effect=lambda request: PlainResult(value=request.key))
 
-    @query_registry
+    @app.queries
     def fetch_plain(query_args: FetchPlainQuery) -> PlainResult:
         return spy(request=query_args)
 
@@ -67,11 +67,11 @@ def test_fetch_call_level_caches(query_registry, query_executor) -> None:
     spy.assert_called_once()
 
 
-def test_fetch_different_query_fields_each_fetched(query_registry, query_executor) -> None:
+def test_fetch_different_query_fields_each_fetched(app, query_executor) -> None:
     # Arrange
     spy = MagicMock(side_effect=lambda request: PlainResult(value=request.key))
 
-    @query_registry
+    @app.queries
     def fetch_plain(query_args: FetchPlainQuery) -> PlainResult:
         return spy(request=query_args)
 
@@ -90,11 +90,11 @@ def test_fetch_different_query_fields_each_fetched(query_registry, query_executo
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_entity_first_call_fetches_all(query_registry, query_executor) -> None:
+def test_fetch_entity_first_call_fetches_all(app, query_executor) -> None:
     # Arrange
     spy = _entity_spy()
 
-    @query_registry
+    @app.queries
     def fetch_entities(query_args: FetchEntitiesQuery) -> dict[int, Entity]:
         return spy(ids=query_args.ids)
 
@@ -106,11 +106,11 @@ def test_fetch_entity_first_call_fetches_all(query_registry, query_executor) -> 
     spy.assert_called_once()
 
 
-def test_fetch_entity_same_ids_not_refetched(query_registry, query_executor) -> None:
+def test_fetch_entity_same_ids_not_refetched(app, query_executor) -> None:
     # Arrange
     spy = _entity_spy()
 
-    @query_registry
+    @app.queries
     def fetch_entities(query_args: FetchEntitiesQuery) -> dict[int, Entity]:
         return spy(ids=query_args.ids)
 
@@ -124,11 +124,11 @@ def test_fetch_entity_same_ids_not_refetched(query_registry, query_executor) -> 
     spy.assert_not_called()
 
 
-def test_fetch_entity_subset_not_refetched(query_registry, query_executor) -> None:
+def test_fetch_entity_subset_not_refetched(app, query_executor) -> None:
     # Arrange
     spy = _entity_spy()
 
-    @query_registry
+    @app.queries
     def fetch_entities(query_args: FetchEntitiesQuery) -> dict[int, Entity]:
         return spy(ids=query_args.ids)
 
@@ -143,11 +143,11 @@ def test_fetch_entity_subset_not_refetched(query_registry, query_executor) -> No
     spy.assert_not_called()
 
 
-def test_fetch_entity_overlapping_fetches_only_missing(query_registry, query_executor) -> None:
+def test_fetch_entity_overlapping_fetches_only_missing(app, query_executor) -> None:
     # Arrange
     spy = _entity_spy()
 
-    @query_registry
+    @app.queries
     def fetch_entities(query_args: FetchEntitiesQuery) -> dict[int, Entity]:
         return spy(ids=query_args.ids)
 
@@ -162,11 +162,11 @@ def test_fetch_entity_overlapping_fetches_only_missing(query_registry, query_exe
     spy.assert_called_once_with(ids=frozenset({4}))
 
 
-def test_fetch_absent_ids_excluded_from_result(query_registry, query_executor) -> None:
+def test_fetch_absent_ids_excluded_from_result(app, query_executor) -> None:
     # Arrange
     spy = MagicMock(return_value={})
 
-    @query_registry
+    @app.queries
     def fetch_entities(query_args: FetchEntitiesQuery) -> dict[int, Entity]:
         return spy(ids=query_args.ids)
 
@@ -178,11 +178,11 @@ def test_fetch_absent_ids_excluded_from_result(query_registry, query_executor) -
     spy.assert_called_once()
 
 
-def test_fetch_absent_ids_not_refetched_on_overlap(query_registry, query_executor) -> None:
+def test_fetch_absent_ids_not_refetched_on_overlap(app, query_executor) -> None:
     # Arrange — backend only returns id 1; ids 2 and 3 are absent.
     spy = MagicMock(side_effect=lambda ids: {i: Entity(value=f'e:{i}') for i in ids if i == 1})
 
-    @query_registry
+    @app.queries
     def fetch_entities(query_args: FetchEntitiesQuery) -> dict[int, Entity]:
         return spy(ids=query_args.ids)
 
@@ -199,11 +199,11 @@ def test_fetch_absent_ids_not_refetched_on_overlap(query_registry, query_executo
     assert spy.call_count == 2
 
 
-def test_fetch_absent_id_becomes_present_in_new_executor(query_registry, query_executor) -> None:
+def test_fetch_absent_id_becomes_present_in_new_executor(app, query_executor) -> None:
     # Arrange — absence is cached per-executor (per-request); a new executor must re-fetch.
     call_args: list[frozenset[int]] = []
 
-    @query_registry
+    @app.queries
     def fetch_entities(query_args: FetchEntitiesQuery) -> dict[int, Entity]:
         call_args.append(query_args.ids)
         return {}
@@ -211,43 +211,8 @@ def test_fetch_absent_id_becomes_present_in_new_executor(query_registry, query_e
     query_executor.fetch(FetchEntitiesQuery(ids=frozenset({1})))
 
     # Act
-    fresh_executor = QueryExecutor(queries_registry=query_registry)  # type: ignore[arg-type]
+    fresh_executor = QueryExecutor(query_annotations=app._query_annotations)
     fresh_executor.fetch(FetchEntitiesQuery(ids=frozenset({1})))
 
     # Assert
     assert len(call_args) == 2
-
-
-# ---------------------------------------------------------------------------
-# call() — function-signature dispatch
-# ---------------------------------------------------------------------------
-
-
-def test_call_function_signature_caches_call_level(query_registry, query_executor) -> None:
-    spy = MagicMock(side_effect=lambda key: PlainResult(value=key))
-
-    @query_registry
-    def fetch_plain(key: str) -> PlainResult:
-        return spy(key)
-
-    a = query_executor.call(fetch_plain, key='a')
-    b = query_executor.call(fetch_plain, key='a')
-
-    assert a == b == PlainResult(value='a')
-    spy.assert_called_once()
-
-
-def test_call_function_signature_entity_cache_dedupes(query_registry, query_executor) -> None:
-    spy = MagicMock(side_effect=lambda ids: {i: Entity(value=f'e:{i}') for i in ids})
-
-    @query_registry
-    def fetch_entities(ids: frozenset[int]) -> dict[int, Entity]:
-        return spy(ids)
-
-    query_executor.call(fetch_entities, ids=frozenset({1, 2, 3}))
-    spy.reset_mock()
-
-    result = query_executor.call(fetch_entities, ids=frozenset({2, 3, 4}))
-
-    assert set(result.keys()) == {2, 3, 4}
-    spy.assert_called_once_with(frozenset({4}))
