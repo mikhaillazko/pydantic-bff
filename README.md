@@ -388,8 +388,10 @@ All errors raised by the library subclass `FastBFFError`. Common ones:
 - `BatchContextMissingError` — transformer with `BatchArg` invoked without context
   (row validated via plain `Model.model_validate` instead of `validate_batch`).
 - `DependencyResolutionError` — one or more `Depends(...)` parameters failed to resolve.
-- `DependencyOverrideError` — `DependenciesSetup.override(...)` targeted an
-  unregistered interface.
+- `DependencyOverrideError` — an override targeted an unregistered interface.
+- `InvalidAnnotationError` — a parameter's `Annotated[...]` / `Depends(...)`
+  declaration is malformed.
+- `ScopeNotActiveError` — DI resolution attempted outside an active scope.
 
 ## Development
 

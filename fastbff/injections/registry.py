@@ -91,7 +91,7 @@ class InjectorRegistry:
                     dependency_provider=self._dependency_provider,
                 )
                 if errors:
-                    raise ValueError(errors)
+                    raise DependencyResolutionError(errors)
 
                 return dependant.call(*args, **kwargs, **resolved_dependencies)
 

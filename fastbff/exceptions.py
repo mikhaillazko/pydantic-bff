@@ -26,7 +26,8 @@ class QueryRegistrationError(RegistrationError):
 class TransformerRegistrationError(RegistrationError):
     """Raised when a ``@transformer`` callable is mis-declared.
 
-    Example: missing return type annotation.
+    Example: missing return type annotation, multiple transformer annotations
+    on a single model field.
     """
 
 
@@ -47,8 +48,15 @@ class BatchContextMissingError(FastBFFError, RuntimeError):
     """
 
 
-class ModelNotPreparedError(FastBFFError, RuntimeError):
-    """Raised when a model is asked for batching metadata before introspection."""
+class InvalidAnnotationError(FastBFFError, TypeError):
+    """Raised when a parameter annotation does not have the expected ``Annotated[...]`` shape.
+
+    Used by the DI machinery when reflecting over dependency declarations.
+    """
+
+
+class ScopeNotActiveError(FastBFFError, RuntimeError):
+    """Raised when DI resolution is attempted outside an active ``init_context()`` scope."""
 
 
 class DependencyResolutionError(FastBFFError):
@@ -60,4 +68,4 @@ class DependencyResolutionError(FastBFFError):
 
 
 class DependencyOverrideError(FastBFFError, KeyError):
-    """Raised when ``DependenciesSetup.override`` targets an unregistered interface."""
+    """Raised when an override targets an interface that was not registered."""

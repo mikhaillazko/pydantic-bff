@@ -28,7 +28,10 @@ class QueryExecutor:
         if annotation is None:
             raise QueryNotRegisteredError(f'No @query registered for query object {query_type}')
         query_param_name = annotation.query_param_name
-        assert query_param_name is not None
+        if query_param_name is None:
+            raise QueryNotRegisteredError(
+                f'Query handler for {query_type.__name__!r} has no Query[T] parameter.',
+            )
 
         if annotation.dict_type_key is not None:
             ids_field = annotation.ids_param_name

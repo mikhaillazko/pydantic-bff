@@ -8,6 +8,8 @@ from typing import get_origin
 
 from pydantic import BaseModel as PydanticBaseModel
 
+from fastbff.exceptions import TransformerRegistrationError
+
 from .types import _BATCHES_ATTR
 from .types import BatchInfo
 from .types import TransformerAnnotation
@@ -41,7 +43,10 @@ def _find_transformer_annotation(field_type: type) -> TransformerAnnotation | No
     transformer_annotations = [item for item in metadata if isinstance(item, TransformerAnnotation)]
     if not transformer_annotations:
         return None
-    assert len(transformer_annotations) == 1, transformer_annotations
+    if len(transformer_annotations) > 1:
+        raise TransformerRegistrationError(
+            f'Field declares multiple TransformerAnnotation entries; only one is allowed: {transformer_annotations!r}',
+        )
     return transformer_annotations[0]
 
 

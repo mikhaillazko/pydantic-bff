@@ -49,11 +49,12 @@ from .exceptions import BatchContextMissingError
 from .exceptions import DependencyOverrideError
 from .exceptions import DependencyResolutionError
 from .exceptions import FastBFFError
+from .exceptions import InvalidAnnotationError
 from .exceptions import QueryNotRegisteredError
 from .exceptions import QueryRegistrationError
 from .exceptions import RegistrationError
+from .exceptions import ScopeNotActiveError
 from .exceptions import TransformerRegistrationError
-from .injections.dependencies_setup import DependenciesSetup
 from .injections.dependency_provider import DependencyProvider
 from .injections.registry import InjectorRegistry
 from .injections.registry import get_injector_registry
@@ -81,7 +82,6 @@ __all__ = [
     'QueryExecutor',
     'QueryExecutorMock',
     # DI
-    'DependenciesSetup',
     'DependencyProvider',
     'InjectorRegistry',
     'TransformerAnnotation',
@@ -97,8 +97,10 @@ __all__ = [
     'DependencyOverrideError',
     'DependencyResolutionError',
     'FastBFFError',
+    'InvalidAnnotationError',
     'QueryNotRegisteredError',
     'QueryRegistrationError',
     'RegistrationError',
+    'ScopeNotActiveError',
     'TransformerRegistrationError',
 ]

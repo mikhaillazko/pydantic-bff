@@ -16,6 +16,8 @@ from typing import get_origin
 
 from fastapi.params import Depends as ParamDepends
 
+from fastbff.exceptions import InvalidAnnotationError
+
 
 @cache
 def cached_signature(func: Callable) -> Signature:
@@ -60,7 +62,10 @@ def _introspect_dependencies(dependant: Dependant) -> list[Dependant]:
         annotated_metadata = arg_types_of_annotated[1:]
 
         fastapi_annotations = [arg for arg in annotated_metadata if isinstance(arg, ParamDepends)]
-        assert len(fastapi_annotations) <= 1, f'Cannot specify multiple `Annotated` arguments for {arg_param.name!r}'
+        if len(fastapi_annotations) > 1:
+            raise InvalidAnnotationError(
+                f'Parameter {arg_param.name!r} declares multiple Depends() annotations; only one is allowed.',
+            )
         if fastapi_annotations:
             depends_obj = fastapi_annotations[0]
             call = cast(Callable[..., Any], depends_obj.dependency)

@@ -96,7 +96,7 @@ class QueryAnnotation:
                 continue
             if _is_query_subclass(param_type):
                 if self.query_type is not None:
-                    raise TypeError(
+                    raise QueryRegistrationError(
                         f'@query {original_func.__name__}: multiple Query parameters '
                         f'({self.query_param_name}: {self.query_type.__name__}, '
                         f'{param_name}: {param_type.__name__})',

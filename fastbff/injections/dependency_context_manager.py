@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
+from fastbff.exceptions import ScopeNotActiveError
+
 from .types import DependenciesCache
 
 
@@ -33,5 +35,5 @@ class DependencyContextManager:
     def get_context(self) -> tuple[DependenciesCache, ExitStack]:
         scope = _scope_context.get()
         if scope is None:
-            raise RuntimeError('get_context() called outside of an active init_context() scope')
+            raise ScopeNotActiveError('get_context() called outside of an active init_context() scope.')
         return scope.cache, scope.stack

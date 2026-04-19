@@ -7,6 +7,7 @@ from typing import get_origin
 
 from fastapi.params import Depends as FastDepends
 
+from fastbff.exceptions import InvalidAnnotationError
 from fastbff.injections.dependant import cached_signature
 
 
@@ -40,10 +41,17 @@ def _underlying_class(annotation: Any) -> Any:
 def get_dependency_callable(annotation: type | Callable[..., Any]) -> Callable[..., Any]:
     arg_origin_type = get_origin(annotation)
     if arg_origin_type is not Annotated:
-        raise ValueError('Expect to get Annotated object')
+        raise InvalidAnnotationError(f'Expected an Annotated[T, Depends(...)] object, got {annotation!r}.')
 
     arg_types_of_annotated = get_args(annotation)
-    fastapi_depends_annotation = next(arg for arg in arg_types_of_annotated[1:] if isinstance(arg, FastDepends))
-    assert fastapi_depends_annotation, f'Cannot find `Annotated[type, Depends(call)]` arguments for {annotation}'
-    assert fastapi_depends_annotation.dependency, 'Depends must have callable arg'
+    fastapi_depends_annotation = next(
+        (arg for arg in arg_types_of_annotated[1:] if isinstance(arg, FastDepends)),
+        None,
+    )
+    if fastapi_depends_annotation is None:
+        raise InvalidAnnotationError(
+            f'No Depends(...) metadata found in Annotated[...] for {annotation!r}.',
+        )
+    if fastapi_depends_annotation.dependency is None:
+        raise InvalidAnnotationError(f'Depends() for {annotation!r} has no dependency callable.')
     return fastapi_depends_annotation.dependency

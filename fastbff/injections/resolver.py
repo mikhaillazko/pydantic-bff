@@ -3,6 +3,8 @@ from contextlib import ExitStack
 from contextlib import contextmanager
 from typing import Any
 
+from fastbff.exceptions import FastBFFError
+
 from .dependant import Dependant
 from .dependency_provider import DependencyProvider
 from .types import DependenciesCache
@@ -48,7 +50,8 @@ def solve_dependencies(
         else:
             solved = call(**sub_values)
 
-        assert sub_dependant.name, 'Dependant name must be set'
+        if not sub_dependant.name:
+            raise FastBFFError('Internal error: sub-dependant is missing a parameter name.')
         values[sub_dependant.name] = solved
         if sub_dependant.cache_key not in dependency_cache:
             dependency_cache[sub_dependant.cache_key] = solved
