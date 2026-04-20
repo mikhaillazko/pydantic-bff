@@ -6,7 +6,7 @@ Public surface
 App / Router
 ~~~~~~~~~~~~
 - :class:`FastBFF` — composition root: bundles the queries registry, transformer
-  registry, DI container, and a :class:`QueryExecutor`.
+  registry, and exposes FastAPI-native DI via :meth:`FastBFF.mount`.
 - :class:`QueryRouter` — local registration scope, attached via
   :meth:`FastBFF.include_router`.
 
@@ -28,11 +28,6 @@ Queries
   entity-level caching.
 - :class:`QueryExecutorMock` — test double for stubbing queries.
 
-Dependency injection
-~~~~~~~~~~~~~~~~~~~~
-- :class:`InjectorRegistry` — DI container (``inject``, ``entrypoint``, ``bind``).
-- :class:`TransformerRegistry` — ``@transformer`` decorator factory.
-
 Test helpers
 ~~~~~~~~~~~~
 - :func:`transformer_callable` / :func:`transformer_metadata` — extract underlying
@@ -46,25 +41,16 @@ Exceptions
 from .app import FastBFF
 from .batch import validate_batch
 from .exceptions import BatchContextMissingError
-from .exceptions import DependencyOverrideError
-from .exceptions import DependencyResolutionError
 from .exceptions import FastBFFError
-from .exceptions import InvalidAnnotationError
 from .exceptions import QueryNotRegisteredError
 from .exceptions import QueryRegistrationError
 from .exceptions import RegistrationError
-from .exceptions import ScopeNotActiveError
 from .exceptions import TransformerRegistrationError
-from .injections.dependency_provider import DependencyProvider
-from .injections.registry import InjectorRegistry
-from .injections.registry import get_injector_registry
 from .query_executor.query import Query
 from .query_executor.query_executor import QueryExecutor
 from .query_executor.query_executor_mock import QueryExecutorMock
 from .router import QueryRouter
-from .transformer.registry import TransformerRegistry
 from .transformer.registry import build_transform_annotated
-from .transformer.registry import get_transformer_registry
 from .transformer.registry import transformer_callable
 from .transformer.registry import transformer_metadata
 from .transformer.types import BatchArg
@@ -81,26 +67,17 @@ __all__ = [
     'Query',
     'QueryExecutor',
     'QueryExecutorMock',
-    # DI
-    'DependencyProvider',
-    'InjectorRegistry',
+    # Transformer
     'TransformerAnnotation',
-    'TransformerRegistry',
     'build_transform_annotated',
-    'get_injector_registry',
-    'get_transformer_registry',
     # Test helpers
     'transformer_callable',
     'transformer_metadata',
     # Exceptions
     'BatchContextMissingError',
-    'DependencyOverrideError',
-    'DependencyResolutionError',
     'FastBFFError',
-    'InvalidAnnotationError',
     'QueryNotRegisteredError',
     'QueryRegistrationError',
     'RegistrationError',
-    'ScopeNotActiveError',
     'TransformerRegistrationError',
 ]

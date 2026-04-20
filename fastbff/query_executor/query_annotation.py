@@ -77,8 +77,7 @@ class QueryAnnotation:
     lookups in :class:`QueryExecutor` need no further reflection.
     """
 
-    def __init__(self, call: Callable, original_func: Callable) -> None:
-        self.call = call
+    def __init__(self, original_func: Callable) -> None:
         self.original_func = original_func
         hints = get_type_hints(original_func)
         return_type = hints.get('return')

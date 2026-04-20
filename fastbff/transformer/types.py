@@ -14,8 +14,8 @@ from pydantic_core.core_schema import ValidationInfo
 
 from fastbff.exceptions import BatchContextMissingError
 from fastbff.exceptions import TransformerRegistrationError
-from fastbff.injections.dependant import cached_signature
-from fastbff.injections.reflection import find_arg_info
+from fastbff.reflection import cached_signature
+from fastbff.reflection import find_arg_info
 
 _BATCHES_ATTR = '__batches__'
 _TRANSFORMER_ANNOTATION_ATTR = '_transformer_annotation'
@@ -77,7 +77,6 @@ class TransformerAnnotation:
     def __init__(
         self,
         original_func: Callable,
-        wrapped_call: Callable,
     ) -> None:
         return_type = get_type_hints(original_func).get('return')
         if return_type is None:
@@ -89,7 +88,7 @@ class TransformerAnnotation:
         call_sign = cached_signature(original_func)
         self.has_info_arg = any(param.annotation is ValidationInfo for param in call_sign.parameters.values())
         self.original_func = original_func
-        self.call = wrapped_call
+        self.call = original_func
         self.return_type = return_type
         self.batch_fetch_type: type | None = None
         if batch_arg_cls is not None:
@@ -130,7 +129,12 @@ class TransformerAnnotation:
             ids = info.context[self.batch_key]
             keyword[self.batch_arg_name] = BatchArg(ids=frozenset(ids))
 
-        return self.call(*positional, **keyword)
+        if info.context is not None:
+            query_executor = info.context.get('query_executor')
+            if query_executor is not None:
+                keyword.update(query_executor.deps_for(self.original_func))
+
+        return self.original_func(*positional, **keyword)
 
     def __repr__(self) -> str:
         func_name = getattr(self.original_func, '__name__', str(self.original_func))

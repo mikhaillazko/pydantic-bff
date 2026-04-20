@@ -5,8 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from fastbff.router import QueryRouter
 from fastbff.transformer.batcher import populate_context_with_batch
-from fastbff.transformer.registry import TransformerRegistry
 from fastbff.transformer.registry import build_transform_annotated
 from fastbff.transformer.types import BatchArg
 
@@ -20,10 +20,10 @@ class User:
 UserId = int
 
 
-def test_populate_context_collects_scalar_ids(noop_injector) -> None:
-    transformer = TransformerRegistry(injector=noop_injector)
+def test_populate_context_collects_scalar_ids() -> None:
+    router = QueryRouter()
 
-    @transformer
+    @router.transformer
     def transform_user(user_id: UserId, batch: BatchArg[UserId]) -> User:
         return User(id=user_id, name='')
 
@@ -40,10 +40,10 @@ def test_populate_context_collects_scalar_ids(noop_injector) -> None:
     assert context == {batch_key: {1, 2}}
 
 
-def test_populate_context_collects_iterable_ids_and_skips_none(noop_injector) -> None:
-    transformer = TransformerRegistry(injector=noop_injector)
+def test_populate_context_collects_iterable_ids_and_skips_none() -> None:
+    router = QueryRouter()
 
-    @transformer
+    @router.transformer
     def transform_user(user_id: UserId, batch: BatchArg[UserId]) -> list[User]:
         return []
 

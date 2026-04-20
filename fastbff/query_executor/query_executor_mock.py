@@ -12,8 +12,15 @@ class QueryExecutorMock(QueryExecutor):
     un-stubbed queries fall through to the real :class:`QueryExecutor`.
     """
 
-    def __init__(self, query_annotations: dict[type, QueryAnnotation]) -> None:
-        super().__init__(query_annotations)
+    def __init__(
+        self,
+        query_annotations: dict[type, QueryAnnotation],
+    ) -> None:
+        super().__init__(
+            query_annotations,
+            resolved_deps=None,
+            handler_index=None,
+        )
         self._query_stubs: dict[type, Any] = {}
 
     def stub_query[T](self, query_type: type[Query[T]], return_value: T) -> None:

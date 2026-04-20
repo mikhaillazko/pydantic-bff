@@ -55,8 +55,10 @@ def test_render_issues_one_bulk_call_per_page() -> None:
     ]
 
     @app.entrypoint
-    def render_page() -> list[TeamDTO]:
-        return validate_batch(TeamDTO, rows)
+    def render_page(
+        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
+    ) -> list[TeamDTO]:
+        return validate_batch(TeamDTO, rows, query_executor=query_executor)
 
     results = render_page()
 

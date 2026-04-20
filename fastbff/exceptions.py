@@ -46,26 +46,3 @@ class BatchContextMissingError(FastBFFError, RuntimeError):
     instead of :func:`validate_batch`, which builds the batch context and
     threads it through ``context=``.
     """
-
-
-class InvalidAnnotationError(FastBFFError, TypeError):
-    """Raised when a parameter annotation does not have the expected ``Annotated[...]`` shape.
-
-    Used by the DI machinery when reflecting over dependency declarations.
-    """
-
-
-class ScopeNotActiveError(FastBFFError, RuntimeError):
-    """Raised when DI resolution is attempted outside an active ``init_context()`` scope."""
-
-
-class DependencyResolutionError(FastBFFError):
-    """Raised when one or more ``Depends(...)`` parameters fail to resolve."""
-
-    def __init__(self, errors: list[object]) -> None:
-        super().__init__(f'Failed to resolve dependencies: {errors!r}')
-        self.errors = errors
-
-
-class DependencyOverrideError(FastBFFError, KeyError):
-    """Raised when an override targets an interface that was not registered."""

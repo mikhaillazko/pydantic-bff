@@ -1,14 +1,16 @@
 from collections.abc import Callable
+from functools import cache
+from inspect import Signature
 from inspect import isclass
+from inspect import signature
 from typing import Annotated
 from typing import Any
-from typing import get_args
 from typing import get_origin
 
-from fastapi.params import Depends as FastDepends
 
-from fastbff.exceptions import InvalidAnnotationError
-from fastbff.injections.dependant import cached_signature
+@cache
+def cached_signature(func: Callable) -> Signature:
+    return signature(func)
 
 
 def find_arg_info(func: Callable, target_type: type) -> tuple[str | None, type | None]:
@@ -36,22 +38,3 @@ def _underlying_class(annotation: Any) -> Any:
     if isclass(origin):
         return origin
     return annotation
-
-
-def get_dependency_callable(annotation: type | Callable[..., Any]) -> Callable[..., Any]:
-    arg_origin_type = get_origin(annotation)
-    if arg_origin_type is not Annotated:
-        raise InvalidAnnotationError(f'Expected an Annotated[T, Depends(...)] object, got {annotation!r}.')
-
-    arg_types_of_annotated = get_args(annotation)
-    fastapi_depends_annotation = next(
-        (arg for arg in arg_types_of_annotated[1:] if isinstance(arg, FastDepends)),
-        None,
-    )
-    if fastapi_depends_annotation is None:
-        raise InvalidAnnotationError(
-            f'No Depends(...) metadata found in Annotated[...] for {annotation!r}.',
-        )
-    if fastapi_depends_annotation.dependency is None:
-        raise InvalidAnnotationError(f'Depends() for {annotation!r} has no dependency callable.')
-    return fastapi_depends_annotation.dependency

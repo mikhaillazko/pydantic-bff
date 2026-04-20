@@ -59,8 +59,10 @@ def test_bff_app_renders_a_transformer_field() -> None:
     ]
 
     @app.entrypoint
-    def render_page() -> list[TeamDTO]:
-        return validate_batch(TeamDTO, rows)
+    def render_page(
+        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
+    ) -> list[TeamDTO]:
+        return validate_batch(TeamDTO, rows, query_executor=query_executor)
 
     results = render_page()
 
@@ -118,9 +120,12 @@ def test_include_router_merges_queries_and_transformers() -> None:
     }
 
     @router.queries
-    def fetch_teams(args: FetchTeams) -> list[TeamDTO]:
+    def fetch_teams(
+        args: FetchTeams,
+        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
+    ) -> list[TeamDTO]:
         rows = teams_by_type[args.type]
-        return validate_batch(TeamDTO, rows)
+        return validate_batch(TeamDTO, rows, query_executor=query_executor)
 
     app = FastBFF()
     app.include_router(router)
@@ -212,8 +217,10 @@ def test_router_dependencies_resolve_through_app_after_include() -> None:
     app.include_router(router)
 
     @app.entrypoint
-    def render_one() -> NameDTO:
-        return validate_batch(NameDTO, [{'greeting': 'world'}])[0]
+    def render_one(
+        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
+    ) -> NameDTO:
+        return validate_batch(NameDTO, [{'greeting': 'world'}], query_executor=query_executor)[0]
 
     result = render_one()
     assert result.greeting == Greeting(message='stub hello world')
