@@ -42,9 +42,16 @@ def populate_context_with_batch(
 
 
 def get_model_batches(return_model: type[PydanticBaseModel]) -> list[BatchInfo]:
-    """Return the cached :class:`BatchInfo` list for *return_model*, introspecting on demand."""
-    cached = getattr(return_model, _BATCHES_ATTR, None)
+    """Return the cached :class:`BatchInfo` list for *return_model*, introspecting on demand.
+
+    Reads ``return_model.__dict__`` directly rather than ``getattr`` so the
+    lookup does not walk the MRO. Otherwise, once a parent class is
+    introspected, every subclass would silently inherit the parent's batches
+    and skip its own introspection — losing any subclass-only transformer
+    fields and ignoring overrides.
+    """
+    cached = return_model.__dict__.get(_BATCHES_ATTR)
     if cached is not None:
         return cached
     introspect_model_transformers(return_model)
-    return getattr(return_model, _BATCHES_ATTR, [])
+    return return_model.__dict__.get(_BATCHES_ATTR, [])
