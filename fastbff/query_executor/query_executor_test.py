@@ -211,7 +211,7 @@ def test_fetch_absent_id_becomes_present_in_new_executor(app, query_executor) ->
     query_executor.fetch(FetchEntitiesQuery(ids=frozenset({1})))
 
     # Act
-    fresh_executor = QueryExecutor(query_annotations=app._query_annotations)
+    fresh_executor = QueryExecutor(query_annotations=app.query_annotations)
     fresh_executor.fetch(FetchEntitiesQuery(ids=frozenset({1})))
 
     # Assert

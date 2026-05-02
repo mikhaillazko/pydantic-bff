@@ -12,29 +12,7 @@ Completed items have been removed; check `git log` for the fix details.
 
 ## P0 — credibility blockers (a new user gives up in 30 seconds)
 
-### 1. README documents APIs and exceptions that do not exist
-
-`README.md` references symbols absent from the codebase:
-
-- `InjectorRegistry` (DI section, `README.md:212`) — class does not exist.
-  The code uses FastAPI's `dependency_overrides` directly via `FastBFF.bind`.
-- `DependencyResolutionError`, `DependencyOverrideError`,
-  `InvalidAnnotationError`, `ScopeNotActiveError` (`README.md:390-394`) —
-  none defined in `fastbff/exceptions.py`.
-- `README.md:415` says the integration test lives at `integration_test.py`
-  in the project root — actual path is `integration_tests/`.
-
-**Fix**: rewrite the affected sections to match the real public surface
-(`fastbff/__init__.py`, `fastbff/exceptions.py`). Treat the public
-exception list as the source of truth — either add the missing exception
-types or delete the doc lines.
-
-While you're in the README, also add a "Module organisation" note: under
-PEP 563, models/transformers/queries that reference local-scope names
-won't resolve through `typing.get_type_hints` — declare them at module
-level. This matches Pydantic's own constraint.
-
-### 2. Async handlers and transformers are accepted but broken
+### 1. Async handlers and transformers are accepted but broken
 
 `QueryExecutor.fetch` (`fastbff/query_executor/query_executor.py:61`) and
 `TransformerAnnotation._validate` (`fastbff/transformer/types.py:116`)
@@ -53,7 +31,7 @@ Larger scope — track separately once the rejection is in.
 
 ## P1 — silent footguns
 
-### 3. `bind()` after `mount()` does not propagate
+### 2. `bind()` after `mount()` does not propagate
 
 `FastBFF.mount` (`fastbff/app.py:189`) does
 `fastapi_app.dependency_overrides.update(self._overrides)` — a one-shot
@@ -66,7 +44,7 @@ Users (especially in tests) expect post-mount binds to take effect.
   prefer rewriting `bind` to write to both if mounted).
 - Or document loudly + raise on `bind` after `mount`.
 
-### 4. `_to_hashable` blows up on common Pydantic shapes
+### 3. `_to_hashable` blows up on common Pydantic shapes
 
 `fastbff/query_executor/query_cache.py:50` does not handle Pydantic
 `BaseModel`, `datetime`, `UUID`, dataclasses, etc. The first time a user
@@ -81,12 +59,12 @@ nests a model inside a `Query` field, the cache key construction raises
 
 ## P2 — packaging and release process
 
-### 5. `pyproject.toml` status is `Alpha` and version is `0.1.0`
+### 4. `pyproject.toml` status is `Alpha` and version is `0.1.0`
 
 `pyproject.toml:13`. For "wide developer use" this signals "do not depend
 on this." Decide what stability bar we are committing to and bump.
 
-### 6. `publish.yml` has no tag/version guard
+### 5. `publish.yml` has no tag/version guard
 
 `.github/workflows/publish.yml` runs `uv publish` on any release event
 without checking the git tag matches `pyproject.toml` `version`, and
@@ -96,13 +74,13 @@ without a TestPyPI dry-run.
 - Add a step that fails if `pyproject.toml` `version` != `${GITHUB_REF_NAME#v}`.
 - Optionally add a manual-dispatch TestPyPI workflow before promoting.
 
-### 7. No `__version__` constant
+### 6. No `__version__` constant
 
 `fastbff/__init__.py` should expose `__version__` (read from package
 metadata via `importlib.metadata.version("fastbff")` so it stays in sync
 with `pyproject.toml`).
 
-### 8. No `CHANGELOG.md`, no `CONTRIBUTING.md`, no docs site
+### 7. No `CHANGELOG.md`, no `CONTRIBUTING.md`, no docs site
 
 For wide adoption:
 - `CHANGELOG.md` (Keep-a-Changelog format) so users can scan before
@@ -112,7 +90,7 @@ For wide adoption:
 - Optional but recommended: a docs site (mkdocs-material) for the
   cookbook + reference, separate from the README.
 
-### 9. Internal FastAPI APIs in `_run_entrypoint`
+### 8. Internal FastAPI APIs in `_run_entrypoint`
 
 `fastbff/app.py:223-243` constructs scope keys (`fastapi_inner_astack`,
 `fastapi_function_astack`) that are FastAPI-internal and post-0.112.
@@ -124,7 +102,7 @@ path will fail on 0.100-0.111.
   that has both keys is — verify, don't guess).
 - Add an integration test pinned to that floor in CI.
 
-### 10. `requires-python = ">=3.12"` excludes the bulk of production fleets
+### 9. `requires-python = ">=3.12"` excludes the bulk of production fleets
 
 PEP 695 generics (`class Query[T]`) lock out Python 3.10/3.11. If wide
 adoption is the goal, support 3.11 by rewriting the generics with

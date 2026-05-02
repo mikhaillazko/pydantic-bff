@@ -207,9 +207,12 @@ regardless of row count.
 
 ### Dependency injection
 
-`InjectorRegistry` wraps FastAPI's `Depends`. Registration decorators (`@app.queries`,
-`@app.transformer`) automatically wrap your callables so FastAPI-style dependencies
-resolve at call time:
+fastbff defers to FastAPI's own DI: every registered handler is left as-is,
+and at finalize time the app synthesises a single `provide_query_executor`
+factory whose signature declares the union of every handler's
+`Annotated[..., Depends(...)]` parameters. FastAPI resolves that graph
+once per request and the executor hands the resolved values to each
+handler / transformer at dispatch time.
 
 ```python
 @app.queries
@@ -219,18 +222,34 @@ def fetch_users(args: FetchUsers, session: DBSession) -> dict[int, User]:
 
 @app.entrypoint
 def handler() -> ...:
-    # `entrypoint` opens a fresh dependency scope for this call
+    # `entrypoint` resolves Depends offline (no HTTP server) by driving
+    # FastAPI's solve_dependencies through a synthetic Request.
     ...
 ```
 
-`app.bind(InterfaceOrAnnotatedAlias, factory)` registers a provider — both a bare
-class and its ``Annotated[Class, Depends(Class)]`` alias resolve to the same override
-entry, so pass whichever is convenient. Works equally well with test doubles:
+`FastBFF` is a `dependency_overrides_provider` — its
+`dependency_overrides` dict is the same one FastAPI uses. The
+`app.bind(target, factory)` helper is a thin wrapper that writes into it
+and accepts both a bare class and its `Annotated[Class, Depends(Class)]`
+alias, mapping both to the same override key:
 
 ```python
 app.bind(QueryExecutor, lambda: shared_executor)
 app.bind(SomeService, lambda: FakeService())
 ```
+
+Bind *before* `app.mount(fastapi_app)` — `mount` copies overrides into
+the FastAPI app's `dependency_overrides` once.
+
+### Module organisation
+
+Declare your transformers, queries, and DTOs at module scope. fastbff
+introspects them with `typing.get_type_hints`, which resolves string
+annotations against the *module's* globals — so models declared in
+modules with `from __future__ import annotations` (PEP 563) work out of
+the box, but a class or function defined inside another function and
+referencing other locals will fail to resolve. This is the same
+constraint Pydantic itself imposes.
 
 ### `QueryRouter` + `app.include_router`
 
@@ -359,15 +378,19 @@ reused across every query/transformer in a single request.
 Spell out the `Annotated[QueryExecutor, Depends(QueryExecutor)]` form at every use
 site — FastAPI walks the `Annotated` metadata and resolves a fresh
 `QueryExecutor` per request (per-request cache, per-request absence tracking).
-Override providers in tests via FastAPI's standard `fastapi_app.dependency_overrides`,
-or the injector's own `app.bind(...)`.
+Override providers in tests via FastAPI's standard
+`fastapi_app.dependency_overrides`, or `app.bind(...)`.
 
 ### Testing with `QueryExecutorMock`
+
+`QueryExecutorMock` takes the app's `query_annotations` index. Stubbed
+queries return the canned value; un-stubbed queries fall through to the
+real `@queries` handler:
 
 ```python
 from fastbff import QueryExecutorMock
 
-mock = QueryExecutorMock(router=app.router)
+mock = QueryExecutorMock(query_annotations=app.query_annotations)
 mock.stub_query(FetchUsers, {10: User(id=10, name='u10')})
 
 assert mock.fetch(FetchUsers(ids=frozenset({10}))) == {10: User(id=10, name='u10')}
@@ -376,20 +399,23 @@ mock.reset_mock()  # clear stubs; subsequent fetch() calls hit real @queries han
 
 ## Errors
 
-All errors raised by the library subclass `FastBFFError`. Common ones:
+All errors raised by the library subclass `FastBFFError`:
 
-- `QueryRegistrationError` — bad `@queries` declaration (missing return type, mismatch),
-  or duplicate registration when including a router.
-- `TransformerRegistrationError` — bad `@transformer` declaration, or
-  `build_transform_annotated` called on an unregistered function.
-- `QueryNotRegisteredError` — `fetch`/`call` against an unregistered handler.
-- `BatchContextMissingError` — transformer with `BatchArg` invoked without context
-  (row validated via plain `Model.model_validate` instead of `validate_batch`).
-- `DependencyResolutionError` — one or more `Depends(...)` parameters failed to resolve.
-- `DependencyOverrideError` — an override targeted an unregistered interface.
-- `InvalidAnnotationError` — a parameter's `Annotated[...]` / `Depends(...)`
-  declaration is malformed.
-- `ScopeNotActiveError` — DI resolution attempted outside an active scope.
+- `RegistrationError` — base class for the registration-time errors below.
+  - `QueryRegistrationError` — bad `@queries` declaration (missing return type,
+    return type does not match `Query[T]`, multiple `Query[T]` parameters)
+    or a duplicate registration of the same query function or query type
+    (raised by both `@app.queries` and `app.include_router`).
+  - `TransformerRegistrationError` — bad `@transformer` declaration (missing
+    return type, multiple `TransformerAnnotation` entries on a field),
+    `build_transform_annotated` called on an unregistered function, or a
+    duplicate `@transformer` registration on a single router or across an
+    `include_router` merge.
+- `QueryNotRegisteredError` — `QueryExecutor.fetch` received a query class
+  with no registered handler. Subclasses `KeyError` for back-compat.
+- `BatchContextMissingError` — transformer with a `BatchArg` was invoked
+  without a batch context, almost always because the row was validated via
+  plain `Model.model_validate` instead of `validate_batch(Model, rows, ...)`.
 
 ## Development
 
@@ -408,9 +434,10 @@ uv run pre-commit install       # install git hooks
 uv run pre-commit run --all-files
 ```
 
-Tests are colocated with the modules they exercise, using the `_test.py` suffix
-(e.g. `fastbff/query_executor/query_executor_test.py`). The cross-cutting
-three-phase integration test lives at `integration_test.py` in the project root.
+Tests are colocated with the modules they exercise, using the `_test.py`
+suffix (e.g. `fastbff/query_executor/query_executor_test.py`).
+Integration tests that assemble a real FastAPI + SQLAlchemy + SQLite app
+live in `integration_tests/`.
 
 ## License
 
