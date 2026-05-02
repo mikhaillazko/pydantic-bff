@@ -92,16 +92,27 @@ Users (especially in tests) expect post-mount binds to take effect.
   prefer rewriting `bind` to write to both if mounted).
 - Or document loudly + raise on `bind` after `mount`.
 
-### 5. Inherited transformer fields are skipped
+### 5. Inherited transformer fields are skipped — DONE
 
-`introspect_model_transformers` (`fastbff/transformer/inspection.py:18`)
-reads `get_annotations(cls)` — only class-level annotations. A `BaseDTO`
-with a transformer field, sub-classed by `TeamDTO`, won't have its batch
-fields picked up unless the field is redeclared on the subclass.
+Two layers of bug:
 
-**Fix**: walk `cls.__mro__` collecting annotations, dedup by field name
-(child overrides parent). Add a test that defines a parent model with a
-transformer field and asserts the child still batches.
+- `introspect_model_transformers` used to read `get_annotations(cls)` which
+  only looks at class-level annotations. **Already fixed by #2** —
+  `get_type_hints(cls, include_extras=True)` walks the MRO and merges
+  parent annotations.
+- `get_model_batches` (`fastbff/transformer/batcher.py`) used
+  `getattr(cls, '__batches__', None)` which walks the MRO too — so once a
+  parent was introspected, every subclass silently inherited the parent's
+  cached list and skipped its own introspection. Any subclass-only
+  transformer field would silently drop out of bulk fetching.
+
+**Fix landed**:
+- `fastbff/transformer/batcher.py` — `get_model_batches` reads through
+  `cls.__dict__.get(...)` so the cache lookup is per-class.
+- `fastbff/transformer/inheritance_test.py` — three regression tests:
+  inherited field discovery, the cache-short-circuit case (parent
+  introspected first), and a full Plan/Fetch/Merge through an
+  inheriting DTO.
 
 ### 6. `_to_hashable` blows up on common Pydantic shapes
 
