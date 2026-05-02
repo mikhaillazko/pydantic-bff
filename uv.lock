@@ -94,6 +94,11 @@ dependencies = [
     { name = "pydantic" },
 ]
 
+[package.optional-dependencies]
+sqlalchemy = [
+    { name = "sqlalchemy" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "httpx" },
@@ -108,7 +113,9 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.100" },
     { name = "pydantic", specifier = ">=2.0,<3" },
+    { name = "sqlalchemy", marker = "extra == 'sqlalchemy'", specifier = ">=2.0" },
 ]
+provides-extras = ["sqlalchemy"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -405,6 +405,33 @@ site — FastAPI walks the `Annotated` metadata and resolves a fresh
 Override providers in tests via FastAPI's standard
 `fastapi_app.dependency_overrides`, or `app.bind(...)`.
 
+### SQLAlchemy extension
+
+Optional extra — install with `pip install fastbff[sqlalchemy]`. The
+`fastbff.sqlalchemy.SqlalchemyConverter` removes the manual `[{...} for row in
+scalars]` loop inside `@queries` handlers:
+
+```python
+from fastbff.sqlalchemy import SqlalchemyConverter
+
+def make_sqlalchemy_converter(session: DBSession) -> SqlalchemyConverter:
+    return SqlalchemyConverter(session)
+
+SqlalchemyConverterDep = Annotated[SqlalchemyConverter, Depends(make_sqlalchemy_converter)]
+
+
+@app.queries(FetchTeams)
+def fetch_teams(sqlalchemy_converter: SqlalchemyConverterDep) -> list[TeamDTO]:
+    statement = select(TeamRow.id, TeamRow.owner_id.label('owner'))
+    return sqlalchemy_converter.execute_all(statement, list[TeamDTO])
+```
+
+The converter executes the `Select` and projects rows into the shape fastbff's
+auto-wrap expects — column labels in the `Select` must match field names on
+the target model. The declared return type (`list[TeamDTO]`) describes what
+the *caller* receives after auto-wrap; the converter is row-shaped under the
+hood. Use `execute_one` for `Query[Model]` (single-model) handlers.
+
 ### Testing with `QueryExecutorMock`
 
 `QueryExecutorMock` takes the app's `query_annotations` index. Stubbed

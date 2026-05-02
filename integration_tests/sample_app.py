@@ -8,7 +8,6 @@ FastAPI route — as module-level singletons. Tests import
 
 from collections.abc import Iterator
 from typing import Annotated
-from typing import Any
 
 from fastapi import Depends
 from fastapi import FastAPI
@@ -28,6 +27,7 @@ from fastbff import Query
 from fastbff import QueryExecutor
 from fastbff import QueryRouter
 from fastbff import build_transform_annotated
+from fastbff.sqlalchemy import SqlalchemyConverter
 
 # --- Persistence --------------------------------------------------------------
 # ``StaticPool`` + ``check_same_thread=False`` keeps a single SQLite connection
@@ -68,6 +68,13 @@ def get_db_session() -> Iterator[Session]:
 
 
 DBSession = Annotated[Session, Depends(get_db_session)]
+
+
+def make_sqlalchemy_converter(session: DBSession) -> SqlalchemyConverter:
+    return SqlalchemyConverter(session)
+
+
+SqlalchemyConverterDep = Annotated[SqlalchemyConverter, Depends(make_sqlalchemy_converter)]
 
 
 # --- DTOs ---------------------------------------------------------------------
@@ -123,9 +130,9 @@ class FetchTeams(Query[list[TeamDTO]]):
 
 
 @query_router.queries(FetchTeams)
-def fetch_teams(session: DBSession) -> list[dict[str, Any]]:
-    team_rows = session.execute(select(TeamRow)).scalars().all()
-    return [{'id': row.id, 'owner': row.owner_id} for row in team_rows]
+def fetch_teams(sqlalchemy_converter: SqlalchemyConverterDep) -> list[TeamDTO]:
+    statement = select(TeamRow.id, TeamRow.owner_id.label('owner'))
+    return sqlalchemy_converter.execute_all(statement, list[TeamDTO])
 
 
 # --- HTTP + mount -------------------------------------------------------------

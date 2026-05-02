@@ -26,6 +26,9 @@ dependencies = [
     "fastapi>=0.100",
 ]
 
+[project.optional-dependencies]
+sqlalchemy = ["sqlalchemy>=2.0"]
+
 [project.urls]
 Homepage = "https://github.com/mikhaillazko/fastbff"
 Issues = "https://github.com/mikhaillazko/fastbff/issues"
