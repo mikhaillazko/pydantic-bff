@@ -176,16 +176,18 @@ registers it and returns the function unchanged — directly callable in tests. 
 
 ```python
 @app.transformer
-def transform_owner(
-    owner_id: int,
+def transform_user_id(
+    user_id: int,
     query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
 ) -> User | None:
-    ...
+  ...
 
-UserTransformerAnnotated = build_transform_annotated(transform_owner)
+
+UserTransformerAnnotated = build_transform_annotated(transform_user_id)
+
 
 class TeamDTO(BaseModel):
-    owner: UserTransformerAnnotated
+  owner: UserTransformerAnnotated
 ```
 
 The return type baked into the alias is exactly the function's declared return type
@@ -195,14 +197,6 @@ like:
 ```python
 class CommentDTO(BaseModel):
     author: UserTransformerAnnotated
-```
-
-For unit testing, call the transformer function directly — `@app.transformer`
-returns it unchanged. You construct any `Annotated[..., Depends(...)]`
-parameters yourself (e.g. pass a stub `QueryExecutor`):
-
-```python
-assert transform_owner(owner_id=1, query_executor=fake) == User(id=1, name='…')
 ```
 
 ### `BatchArg[T]`
