@@ -90,17 +90,64 @@ For wide adoption:
 - Optional but recommended: a docs site (mkdocs-material) for the
   cookbook + reference, separate from the README.
 
-### 8. Internal FastAPI APIs in `_run_entrypoint`
+### 8. DI integration leans on FastAPI internals and signature-mutation hacks
 
-`fastbff/app.py:223-243` constructs scope keys (`fastapi_inner_astack`,
-`fastapi_function_astack`) that are FastAPI-internal and post-0.112.
-The `pyproject.toml` floor of `fastapi>=0.100` is wrong — the entrypoint
-path will fail on 0.100-0.111.
+The current injection plumbing piggybacks on private FastAPI surface and
+hand-edits Python's introspection metadata to make `Depends(...)` work
+the way we want. Each one is a load-bearing trick that will quietly
+break when FastAPI changes its internals — and they pile up. The longer
+they stay, the harder the upgrade story gets.
 
-**Fix**:
-- Bump the lower bound to `fastapi>=0.112` (or whatever the lowest version
-  that has both keys is — verify, don't guess).
-- Add an integration test pinned to that floor in CI.
+Sites:
+
+- `fastbff/query_executor/query_executor.py:106` —
+  `QueryExecutor.__signature__ = Signature(parameters=[])`. Forces
+  FastAPI's `get_dependant` to ignore `__init__` params when an
+  endpoint declares `Depends(QueryExecutor)`. The override to
+  `provide_query_executor` is what actually fires; the empty signature
+  is a workaround for FastAPI introspecting the class anyway.
+- `fastbff/di.py:149` —
+  `provide_query_executor.__signature__ = Signature(parameters=...)`.
+  Synthesises a function signature listing the union of every
+  registered handler's deps so FastAPI resolves them all at once.
+- `fastbff/app.py:29-30` — direct imports from
+  `fastapi.dependencies.utils` (`get_dependant`, `solve_dependencies`).
+  Both have changed argument lists across recent FastAPI releases.
+- `fastbff/app.py:261-262` — synthesises a `Request` with the scope
+  keys `fastapi_inner_astack` and `fastapi_function_astack` so
+  `solve_dependencies` does not raise. Both are FastAPI-internal,
+  introduced post-0.112; the `pyproject.toml` floor of
+  `fastapi>=0.100` is wrong — the entrypoint path will fail on
+  0.100-0.111.
+- `fastbff/app.py:_extract_solved_values` — version-shim for the two
+  return shapes of `solve_dependencies` (tuple vs `SolvedDependency`).
+
+**Rework — pick one (or layer them)**:
+
+1. **Lean only on FastAPI's public surface**. Replace the synthetic
+   `provide_query_executor` factory with a small Pydantic / FastAPI
+   sub-app that exposes the union of deps as a normal callable.
+   Resolve `QueryExecutor` itself through the standard
+   `dependency_overrides` mapping with no `__signature__` mutation —
+   the override key already handles the lookup. For offline use
+   (`@app.entrypoint`), call user-side dependency factories directly
+   from the resolved-deps map instead of driving FastAPI's
+   `solve_dependencies` through a fake `Request`.
+2. **Own the DI graph**. Walk the registered handlers ourselves,
+   resolve `Depends(...)` via a tiny container that understands
+   FastAPI-style `Annotated[..., Depends(factory)]` parameters, and
+   stop reaching into `fastapi.dependencies.utils` entirely. The
+   resolver is small (we already have `collect_dep_specs`); the
+   payoff is no FastAPI version coupling at all.
+3. **Minimum-viable cleanup** if the larger rework is out of scope:
+   bump the floor to `fastapi>=0.112` (or whatever the lowest version
+   is that ships both scope keys — verify), pin it in CI, and add a
+   regression test that exercises `@app.entrypoint` against that
+   floor so the next FastAPI bump is a known-cost upgrade.
+
+Whichever path is picked, the goal is: zero `__signature__ =` lines,
+zero imports from `fastapi.dependencies.utils`, zero hand-rolled
+`Request` scopes.
 
 ### 9. `requires-python = ">=3.12"` excludes the bulk of production fleets
 
