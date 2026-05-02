@@ -1,10 +1,10 @@
-from inspect import get_annotations
 from typing import Annotated
 from typing import Any
 from typing import Optional
 from typing import Union
 from typing import get_args
 from typing import get_origin
+from typing import get_type_hints
 
 from pydantic import BaseModel as PydanticBaseModel
 
@@ -21,9 +21,15 @@ def introspect_model_transformers(cls: type[PydanticBaseModel]) -> None:
 
     Invoked lazily on first use (via :func:`get_model_batches`). No-ops when
     the model has no batchable transformer fields.
+
+    Uses :func:`typing.get_type_hints` with ``include_extras=True`` so models
+    declared in modules with ``from __future__ import annotations`` (PEP 563)
+    work transparently — string annotations are evaluated against the model's
+    own module globals while the ``Annotated[...]`` metadata carrying the
+    ``TransformerAnnotation`` is preserved.
     """
     batches = []
-    annotations = get_annotations(cls)
+    annotations = get_type_hints(cls, include_extras=True)
     for field_name, field_type in annotations.items():
         transformer_annotation = _find_transformer_annotation(field_type)
         if transformer_annotation and transformer_annotation.batch_key:

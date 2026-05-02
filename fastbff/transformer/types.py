@@ -15,6 +15,7 @@ from pydantic_core.core_schema import ValidationInfo
 from fastbff.exceptions import BatchContextMissingError
 from fastbff.exceptions import TransformerRegistrationError
 from fastbff.reflection import cached_signature
+from fastbff.reflection import cached_type_hints
 from fastbff.reflection import find_arg_info
 
 _BATCHES_ATTR = '__batches__'
@@ -86,7 +87,11 @@ class TransformerAnnotation:
         batch_arg_name, batch_arg_cls = find_arg_info(original_func, BatchArg)
         self.batch_arg_name = batch_arg_name
         call_sign = cached_signature(original_func)
-        self.has_info_arg = any(param.annotation is ValidationInfo for param in call_sign.parameters.values())
+        hints = cached_type_hints(original_func)
+        self.has_info_arg = any(
+            hints.get(param_name, param.annotation) is ValidationInfo
+            for param_name, param in call_sign.parameters.items()
+        )
         self.original_func = original_func
         self.call = original_func
         self.return_type = return_type

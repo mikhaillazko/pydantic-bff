@@ -28,6 +28,8 @@ from typing import get_origin
 from fastapi import Depends
 from fastapi.params import Depends as DependsParam
 
+from .reflection import cached_type_hints
+
 QUERY_EXECUTOR_SENTINEL = object()
 
 
@@ -44,8 +46,9 @@ HandlerDepIndex = dict[Callable, dict[str, Any]]
 
 
 def _iter_depends_params(func: Callable) -> Iterable[tuple[str, Any, DependsParam]]:
+    hints = cached_type_hints(func)
     for name, param in signature(func).parameters.items():
-        annotation = param.annotation
+        annotation = hints.get(name, param.annotation)
         if get_origin(annotation) is not Annotated:
             continue
         args = get_args(annotation)
