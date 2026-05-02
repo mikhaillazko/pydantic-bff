@@ -144,13 +144,6 @@ For wide adoption:
 - Optional but recommended: a docs site (mkdocs-material) for the
   cookbook + reference, separate from the README.
 
-### 9. `requires-python = ">=3.12"` excludes the bulk of production fleets
-
-PEP 695 generics (`class Query[T]`) lock out Python 3.10/3.11. If wide
-adoption is the goal, support 3.11 by rewriting the generics with
-`TypeVar` / `Generic[T]`. If we keep 3.12+, document the rationale in
-the README.
-
 ---
 
 ## P3 — ergonomics / nits
