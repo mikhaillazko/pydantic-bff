@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Annotated
+from typing import Any
 from typing import Literal
 
 import pytest
@@ -14,7 +15,6 @@ from fastbff import Query
 from fastbff import QueryExecutor
 from fastbff import QueryRouter
 from fastbff import build_transform_annotated
-from fastbff import validate_batch
 from fastbff.exceptions import QueryRegistrationError
 from fastbff.exceptions import TransformerRegistrationError
 
@@ -53,17 +53,22 @@ def test_bff_app_renders_a_transformer_field() -> None:
         id: int
         owner: OwnerTransformerAnnotated
 
-    rows: list[dict[str, int]] = [
-        {'id': 1, 'owner': 10},
-        {'id': 2, 'owner': 20},
-        {'id': 3, 'owner': 10},
-    ]
+    class FetchTeams(Query[list[TeamDTO]]):
+        pass
+
+    @app.queries(FetchTeams)
+    def fetch_teams() -> list[dict[str, Any]]:
+        return [
+            {'id': 1, 'owner': 10},
+            {'id': 2, 'owner': 20},
+            {'id': 3, 'owner': 10},
+        ]
 
     @app.entrypoint
     def render_page(
         query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
     ) -> list[TeamDTO]:
-        return validate_batch(TeamDTO, rows, query_executor=query_executor)
+        return query_executor.fetch(FetchTeams())
 
     results = render_page()
 
@@ -121,12 +126,8 @@ def test_include_router_merges_queries_and_transformers() -> None:
     }
 
     @router.queries
-    def fetch_teams(
-        args: FetchTeams,
-        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-    ) -> list[TeamDTO]:
-        rows = teams_by_type[args.type]
-        return validate_batch(TeamDTO, rows, query_executor=query_executor)
+    def fetch_teams(args: FetchTeams) -> list[dict[str, int]]:
+        return teams_by_type[args.type]
 
     app = FastBFF()
     app.include_router(router)
@@ -278,11 +279,18 @@ def test_router_dependencies_resolve_through_app_after_include() -> None:
     app.bind(Greeter, lambda: StubGreeter())
     app.include_router(router)
 
+    class FetchOne(Query[NameDTO]):
+        pass
+
+    @app.queries(FetchOne)
+    def fetch_one() -> dict[str, str]:
+        return {'greeting': 'world'}
+
     @app.entrypoint
     def render_one(
         query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
     ) -> NameDTO:
-        return validate_batch(NameDTO, [{'greeting': 'world'}], query_executor=query_executor)[0]
+        return query_executor.fetch(FetchOne())
 
     result = render_one()
     assert result.greeting == Greeting(message='stub hello world')

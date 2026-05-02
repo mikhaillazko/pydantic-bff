@@ -28,7 +28,6 @@ from fastbff import Query
 from fastbff import QueryExecutor
 from fastbff import QueryRouter
 from fastbff import build_transform_annotated
-from fastbff import validate_batch
 from fastbff.transformer.batcher import populate_context_with_batch
 
 
@@ -86,13 +85,18 @@ def test_render_pep563_module_issues_one_bulk_call() -> None:
     app = FastBFF()
     app.include_router(_router)
 
-    rows = [{'id': 1, 'owner': 10}, {'id': 2, 'owner': 20}, {'id': 3, 'owner': 10}]
+    class _FetchTeams(Query[list[_TeamDTO]]):
+        pass
+
+    @app.queries(_FetchTeams)
+    def _fetch_teams() -> list[dict[str, int]]:
+        return [{'id': 1, 'owner': 10}, {'id': 2, 'owner': 20}, {'id': 3, 'owner': 10}]
 
     @app.entrypoint
     def render_page(
         query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
     ) -> list[_TeamDTO]:
-        return validate_batch(_TeamDTO, rows, query_executor=query_executor)
+        return query_executor.fetch(_FetchTeams())
 
     results = render_page()
 

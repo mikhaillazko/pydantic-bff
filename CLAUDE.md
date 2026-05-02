@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Principles
+
+1. **Simplicity in DX.** Every feature is judged by what the end developer has to write. Prefer to move work into the framework over asking the user to spell it out. Boilerplate that the framework can derive should not exist in user code.
+2. **Typing everywhere, no `type: ignore`.** Public surface and user-facing examples must type-check cleanly without ignores or casts. If an idiom requires `# type: ignore`, that is a signal the design is wrong — change the API, not the comment.
+3. **Annotation + reflection over duplicated declaration.** When a fact is already encoded in a type annotation (return type, field type, `Annotated[...]` metadata), recover it via `typing.get_type_hints` / `get_args` / `get_origin` instead of asking the user to declare it a second time. The annotation is the source of truth.
+
 ## Commands
 
 This project uses [uv](https://docs.astral.sh/uv/) for env + deps, [ruff](https://docs.astral.sh/ruff/) for lint/format, and [ty](https://docs.astral.sh/ty/) for type checking.

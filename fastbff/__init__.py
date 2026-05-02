@@ -12,9 +12,6 @@ App / Router
 
 Composition
 ~~~~~~~~~~~
-- :func:`validate_batch` — validate a page of rows against a plain
-  :class:`pydantic.BaseModel` with a shared batch context, so batch-aware
-  transformers on the model see the full id set.
 - :class:`BatchArg` — marker parameter type for batch-aware transformers.
 - :func:`build_transform_annotated` — build the ``Annotated[...]`` metadata
   for a ``@transformer``-registered function.
@@ -25,7 +22,10 @@ Queries
 ~~~~~~~
 - :class:`Query` — typed query object (``Query[T]``).
 - :class:`QueryExecutor` — per-request dispatcher with call-level and
-  entity-level caching.
+  entity-level caching. Auto-wraps handler results through ``validate_batch``
+  when the handler's declared return type is a :class:`pydantic.BaseModel`
+  (or ``list`` thereof) with transformer fields, so end users never call
+  ``validate_batch`` directly.
 - :class:`QueryExecutorMock` — test double for stubbing queries.
 
 Test helpers
@@ -39,7 +39,6 @@ Exceptions
 """
 
 from .app import FastBFF
-from .batch import validate_batch
 from .exceptions import BatchContextMissingError
 from .exceptions import FastBFFError
 from .exceptions import QueryNotRegisteredError
@@ -61,7 +60,6 @@ __all__ = [
     'QueryRouter',
     # Composition
     'BatchArg',
-    'validate_batch',
     # Queries
     'Query',
     'QueryExecutor',

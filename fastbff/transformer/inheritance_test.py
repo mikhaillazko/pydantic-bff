@@ -23,7 +23,6 @@ from fastbff import FastBFF
 from fastbff import Query
 from fastbff import QueryExecutor
 from fastbff import build_transform_annotated
-from fastbff import validate_batch
 from fastbff.transformer.batcher import get_model_batches
 from fastbff.transformer.batcher import populate_context_with_batch
 
@@ -154,13 +153,18 @@ def test_inherited_transformer_field_renders_through_entrypoint() -> None:
     class TeamDTO(BaseDTO):
         id: int
 
-    rows = [{'id': 1, 'owner': 10}, {'id': 2, 'owner': 20}, {'id': 3, 'owner': 10}]
+    class FetchTeams(Query[list[TeamDTO]]):
+        pass
+
+    @app.queries(FetchTeams)
+    def fetch_teams() -> list[dict[str, int]]:
+        return [{'id': 1, 'owner': 10}, {'id': 2, 'owner': 20}, {'id': 3, 'owner': 10}]
 
     @app.entrypoint
     def render_page(
         query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
     ) -> list[TeamDTO]:
-        return validate_batch(TeamDTO, rows, query_executor=query_executor)
+        return query_executor.fetch(FetchTeams())
 
     results = render_page()
 

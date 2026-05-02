@@ -8,8 +8,8 @@ monolithic systems.
 
 - **Declarative data composition** — describe the shape of a response once on a Pydantic
   model; fetching happens automatically.
-- **One-call orchestration** — `validate_batch(Model, rows)` runs Plan + Fetch + Merge
-  for a whole page in a single line.
+- **Zero orchestration boilerplate** — `@queries` handlers and `@app.entrypoint` functions
+  return raw rows; the framework runs Plan + Fetch + Merge at the dispatch boundary.
 - **Typed queries** — `Query[T]` carries its own return type, *or* register a plain
   function with a typed signature; both forms cache identically.
 - **Automatic N+1 avoidance** — transformers declare a `BatchArg[T]` and the framework
@@ -33,7 +33,7 @@ Runtime deps: `pydantic>=2`, `fastapi>=0.100`. Python 3.12+ (uses PEP 695 generi
 
 ```python
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
 from pydantic import BaseModel
@@ -44,7 +44,6 @@ from fastbff import (
     Query,
     QueryExecutor,
     build_transform_annotated,
-    validate_batch,
 )
 
 # --- Domain -----------------------------------------------------------------
@@ -84,24 +83,42 @@ class TeamDTO(BaseModel):
     id: int
     owner: OwnerTransformerAnnotated
 
-# --- Handler ---------------------------------------------------------------
+# --- Page-rendering query --------------------------------------------------
+# `Query[list[TeamDTO]]` is the output contract; the handler returns honest
+# rows (`list[dict[str, Any]]`) and the framework validates them to TeamDTO
+# at the dispatch boundary, planning a single bulk `fetch_users` call for
+# the whole page.
 
-@app.entrypoint
-def render_teams_page() -> list[TeamDTO]:
-    rows = [
+class FetchTeams(Query[list[TeamDTO]]):
+    pass
+
+@app.queries(FetchTeams)
+def fetch_teams() -> list[dict[str, Any]]:
+    return [
         {'id': 1, 'owner': 10},
         {'id': 2, 'owner': 20},
         {'id': 3, 'owner': 10},  # duplicate id → still just one DB call
     ]
-    return validate_batch(TeamDTO, rows)
+
+# --- Drive offline (CLI / test) --------------------------------------------
+
+@app.entrypoint
+def render_teams_page(
+    query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
+) -> list[TeamDTO]:
+    return query_executor.fetch(FetchTeams())
 ```
 
 A single page of N rows issues **one** `fetch_users(...)` call — regardless of N, and
-regardless of how many duplicate ids the rows contain.
+regardless of how many duplicate ids the rows contain. The handler honestly types its
+return as `list[dict[str, Any]]`; `Query[list[TeamDTO]]` is the *output* contract that
+`query_executor.fetch(...)` honors after running batch validation.
 
 ## Two-phase execution (under the hood)
 
-`validate_batch(Model, rows)` does two things:
+When a `@queries` handler is registered with `Query[list[Model]]` (or `Query[Model]`)
+where the model has transformer fields, fastbff runs Plan + Merge automatically inside
+`query_executor.fetch(...)`:
 
 ```
 Phase 1 — Plan    walks rows, collects every unique id for every BatchArg field
@@ -112,6 +129,10 @@ Phase 2 — Merge   Model.model_validate(row, context=ctx) for each row
                     row's executor.fetch(...) issues one bulk call covering the
                     whole page, subsequent rows hit the entity-level cache
 ```
+
+Handlers that already build model instances directly (e.g. `dict[int, User]` queries
+constructing `User(...)` per row) flow through unchanged — already-validated values
+are detected and the wrap is a no-op.
 
 ## Core concepts
 
@@ -293,7 +314,7 @@ pipeline will resolve a fresh instance per request. A complete route:
 
 ```python
 from collections.abc import Iterator
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel
@@ -302,7 +323,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from fastbff import (
   FastBFF, BatchArg, Query, QueryExecutor,
-  build_transform_annotated, validate_batch,
+  build_transform_annotated,
 )
 
 # --- SQLAlchemy wiring -----------------------------------------------------
@@ -356,10 +377,9 @@ class FetchTeams(Query[list[TeamDTO]]):
     pass
 
 
-@app.queries
-def fetch_teams(args: FetchTeams, session: DBSession) -> list[TeamDTO]:
-    rows = list(session.execute(select(TeamRow)).mappings().all())
-    return validate_batch(TeamDTO, rows)
+@app.queries(FetchTeams)
+def fetch_teams(session: DBSession) -> list[dict[str, Any]]:
+    return list(session.execute(select(TeamRow)).mappings().all())
 
 
 @fastapi_app.get('/teams', response_model=list[TeamDTO])
@@ -368,6 +388,10 @@ def list_teams(
 ) -> list[TeamDTO]:
     return query_executor.fetch(FetchTeams())
 ```
+
+The `fetch_teams` handler honestly returns rows. fastbff reads `Query[list[TeamDTO]]`
+to know the output target, notices `TeamDTO` has transformer fields, and runs batch
+validation inside `query_executor.fetch(...)` so the endpoint receives validated DTOs.
 
 The `DBSession` alias is a plain FastAPI `Depends(...)` — fastbff's
 `@app.queries` and `@app.transformer` decorators wrap your callable with the
@@ -414,8 +438,10 @@ All errors raised by the library subclass `FastBFFError`:
 - `QueryNotRegisteredError` — `QueryExecutor.fetch` received a query class
   with no registered handler. Subclasses `KeyError` for back-compat.
 - `BatchContextMissingError` — transformer with a `BatchArg` was invoked
-  without a batch context, almost always because the row was validated via
-  plain `Model.model_validate` instead of `validate_batch(Model, rows, ...)`.
+  without a batch context, almost always because a row was validated via
+  plain `Model.model_validate` outside a fastbff dispatch boundary. Return
+  rows from a `@queries` handler or `@app.entrypoint` instead — the auto-
+  wrap builds the batch context for you.
 
 ## Development
 

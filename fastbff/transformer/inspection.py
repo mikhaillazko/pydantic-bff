@@ -11,28 +11,38 @@ from pydantic import BaseModel as PydanticBaseModel
 from fastbff.exceptions import TransformerRegistrationError
 
 from .types import _BATCHES_ATTR
+from .types import _HAS_TRANSFORMERS_ATTR
 from .types import BatchInfo
 from .types import TransformerAnnotation
 
 
 def introspect_model_transformers(cls: type[PydanticBaseModel]) -> None:
-    """Scan *cls*'s annotations for transformer fields with a ``BatchArg`` and
-    cache the batching metadata on ``cls.__batches__``.
+    """Scan *cls*'s annotations for transformer fields and cache results on *cls*.
 
-    Invoked lazily on first use (via :func:`get_model_batches`). No-ops when
-    the model has no batchable transformer fields.
+    Sets two class attributes:
 
-    Uses :func:`typing.get_type_hints` with ``include_extras=True`` so models
-    declared in modules with ``from __future__ import annotations`` (PEP 563)
-    work transparently — string annotations are evaluated against the model's
-    own module globals while the ``Annotated[...]`` metadata carrying the
-    ``TransformerAnnotation`` is preserved.
+    * ``cls.__batches__`` — the :class:`BatchInfo` list for fields that use
+      ``BatchArg`` (drives ``populate_context_with_batch``).
+    * ``cls.__has_transformers__`` — ``True`` if *any* field on the model
+      carries a :class:`TransformerAnnotation`, even a non-batched one
+      (drives the auto-wrap decision in ``QueryExecutor.fetch`` /
+      ``@app.entrypoint``).
+
+    Invoked lazily on first use. Uses :func:`typing.get_type_hints` with
+    ``include_extras=True`` so models declared in modules with
+    ``from __future__ import annotations`` (PEP 563) work transparently —
+    string annotations are evaluated against the model's own module globals
+    while the ``Annotated[...]`` metadata is preserved.
     """
     batches = []
+    has_transformers = False
     annotations = get_type_hints(cls, include_extras=True)
     for field_name, field_type in annotations.items():
         transformer_annotation = _find_transformer_annotation(field_type)
-        if transformer_annotation and transformer_annotation.batch_key:
+        if transformer_annotation is None:
+            continue
+        has_transformers = True
+        if transformer_annotation.batch_key:
             batches.append(
                 BatchInfo(
                     field_name=field_name,
@@ -42,6 +52,7 @@ def introspect_model_transformers(cls: type[PydanticBaseModel]) -> None:
             )
 
     setattr(cls, _BATCHES_ATTR, batches)
+    setattr(cls, _HAS_TRANSFORMERS_ATTR, has_transformers)
 
 
 def _find_transformer_annotation(field_type: type) -> TransformerAnnotation | None:

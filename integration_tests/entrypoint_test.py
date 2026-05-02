@@ -1,12 +1,13 @@
 """In-process Plan → Fetch → Merge flow driven via ``@app.entrypoint``.
 
 Exercises the offline path — no HTTP, no database — to keep the core
-composition semantics (``validate_batch`` + entity-level cache) covered
+composition semantics (auto-wrap + entity-level cache) covered
 independently of the FastAPI/SQLAlchemy integration test.
 """
 
 from dataclasses import dataclass
 from typing import Annotated
+from typing import Any
 
 from fastapi import Depends
 from pydantic import BaseModel
@@ -16,7 +17,6 @@ from fastbff import FastBFF
 from fastbff import Query
 from fastbff import QueryExecutor
 from fastbff import build_transform_annotated
-from fastbff import validate_batch
 
 
 @dataclass(frozen=True)
@@ -53,17 +53,22 @@ def test_render_issues_one_bulk_call_per_page() -> None:
         id: int
         owner: OwnerTransformerAnnotated
 
-    rows: list[dict[str, int]] = [
-        {'id': 1, 'owner': 10},
-        {'id': 2, 'owner': 20},
-        {'id': 3, 'owner': 10},
-    ]
+    class FetchTeams(Query[list[TeamDTO]]):
+        pass
+
+    @app.queries(FetchTeams)
+    def fetch_teams() -> list[dict[str, Any]]:
+        return [
+            {'id': 1, 'owner': 10},
+            {'id': 2, 'owner': 20},
+            {'id': 3, 'owner': 10},
+        ]
 
     @app.entrypoint
     def render_page(
         query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
     ) -> list[TeamDTO]:
-        return validate_batch(TeamDTO, rows, query_executor=query_executor)
+        return query_executor.fetch(FetchTeams())
 
     results = render_page()
 

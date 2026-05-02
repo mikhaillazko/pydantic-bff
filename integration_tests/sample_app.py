@@ -8,6 +8,7 @@ FastAPI route — as module-level singletons. Tests import
 
 from collections.abc import Iterator
 from typing import Annotated
+from typing import Any
 
 from fastapi import Depends
 from fastapi import FastAPI
@@ -27,7 +28,6 @@ from fastbff import Query
 from fastbff import QueryExecutor
 from fastbff import QueryRouter
 from fastbff import build_transform_annotated
-from fastbff import validate_batch
 
 # --- Persistence --------------------------------------------------------------
 # ``StaticPool`` + ``check_same_thread=False`` keeps a single SQLite connection
@@ -122,13 +122,9 @@ class FetchTeams(Query[list[TeamDTO]]):
 
 
 @query_router.queries(FetchTeams)
-def fetch_teams(
-    session: DBSession,
-    query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-) -> list[TeamDTO]:
+def fetch_teams(session: DBSession) -> list[dict[str, Any]]:
     team_rows = session.execute(select(TeamRow)).scalars().all()
-    rows = [{'id': row.id, 'owner': row.owner_id} for row in team_rows]
-    return validate_batch(TeamDTO, rows, query_executor=query_executor)
+    return [{'id': row.id, 'owner': row.owner_id} for row in team_rows]
 
 
 # --- HTTP + mount -------------------------------------------------------------

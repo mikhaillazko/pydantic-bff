@@ -60,6 +60,10 @@ class QueryExecutor:
         return out
 
     def fetch[T](self, query_obj: Query[T]) -> T:
+        # Late import — fastbff.batch depends on QueryExecutor; importing it
+        # at module top would create a cycle.
+        from fastbff.batch import apply_auto_wrap
+
         query_type = type(query_obj)
         annotation = self._query_annotations.get(query_type)
         if annotation is None:
@@ -92,10 +96,16 @@ class QueryExecutor:
             dict(query_obj),
             annotation.dict_value_type if annotation.dict_type_key is not None else None,
         )
-        return self._cache.get_or_call(
-            cache_key,
-            lambda: handler(**query_kwargs, **extra_kwargs),
-        )
+
+        wrap_info = annotation.auto_wrap
+
+        def fetcher() -> Any:
+            result = handler(**query_kwargs, **extra_kwargs)
+            if wrap_info is not None:
+                return apply_auto_wrap(result, wrap_info, self)
+            return result
+
+        return self._cache.get_or_call(cache_key, fetcher)
 
 
 # FastAPI introspects ``Depends(QueryExecutor)`` by reading

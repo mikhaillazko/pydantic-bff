@@ -19,6 +19,7 @@ from fastbff.reflection import cached_type_hints
 from fastbff.reflection import find_arg_info
 
 _BATCHES_ATTR = '__batches__'
+_HAS_TRANSFORMERS_ATTR = '__has_transformers__'
 _TRANSFORMER_ANNOTATION_ATTR = '_transformer_annotation'
 
 
@@ -127,8 +128,9 @@ class TransformerAnnotation:
             if info.context is None:
                 raise BatchContextMissingError(
                     f'Transformer {self.original_func.__name__!r} declares a BatchArg but no '
-                    'validation context was provided. Use `validate_batch(Model, rows)` '
-                    'to validate a page of rows with a shared batch context.',
+                    'validation context was provided. Return the rows from a `@queries` '
+                    'handler or `@FastBFF.entrypoint` whose declared return type is the '
+                    'model — fastbff will build the batch context at the dispatch boundary.',
                 )
             ids = info.context[self.batch_key]
             keyword[self.batch_arg_name] = BatchArg(ids=frozenset(ids))

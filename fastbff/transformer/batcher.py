@@ -7,6 +7,7 @@ from pydantic import BaseModel as PydanticBaseModel
 
 from .inspection import introspect_model_transformers
 from .types import _BATCHES_ATTR
+from .types import _HAS_TRANSFORMERS_ATTR
 from .types import BatchInfo
 
 
@@ -55,3 +56,24 @@ def get_model_batches(return_model: type[PydanticBaseModel]) -> list[BatchInfo]:
         return cached
     introspect_model_transformers(return_model)
     return return_model.__dict__.get(_BATCHES_ATTR, [])
+
+
+def model_has_transformer_fields(model: type) -> bool:
+    """Return ``True`` if *model* has any field carrying a ``TransformerAnnotation``.
+
+    Includes non-batched transformers (plain ``@transformer`` fields without
+    ``BatchArg``) — those still need the ``query_executor`` in validation
+    context to resolve their ``Depends(...)`` params, so they share the same
+    auto-wrap path as batched transformers.
+
+    Reads ``model.__dict__`` directly so subclass introspection is not
+    short-circuited by a parent's cache (same rationale as
+    :func:`get_model_batches`).
+    """
+    if not isinstance(model, type) or not issubclass(model, PydanticBaseModel):
+        return False
+    cached = model.__dict__.get(_HAS_TRANSFORMERS_ATTR)
+    if cached is not None:
+        return cached
+    introspect_model_transformers(model)
+    return model.__dict__.get(_HAS_TRANSFORMERS_ATTR, False)

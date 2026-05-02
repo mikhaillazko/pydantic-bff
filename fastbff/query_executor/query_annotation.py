@@ -53,6 +53,30 @@ def extract_query_return_type(query_cls: type) -> Any | None:
     return getattr(query_cls, '__query_return_type__', None)
 
 
+def _is_row_shaped(t: Any) -> bool:
+    """Whether *t* is a 'rows' shape: ``list[Mapping]``, ``Mapping``, or close.
+
+    The auto-wrap path lets a handler honestly declare ``-> list[dict[str, Any]]``
+    (or single ``Mapping``) and have the framework validate to ``Query[T].T``
+    at dispatch time. Anything else has to match ``Query[T].T`` exactly so
+    genuine model-mismatch bugs (handler returns ``Entity`` while query says
+    ``PlainResult``) still fail at registration.
+    """
+    import collections.abc as collections_abc
+
+    if t is dict or t is collections_abc.Mapping:
+        return True
+    origin = get_origin(t)
+    if origin is dict or origin is collections_abc.Mapping:
+        return True
+    if origin is list:
+        args = get_args(t)
+        if not args:
+            return False
+        return _is_row_shaped(args[0])
+    return isinstance(t, type) and issubclass(t, collections_abc.Mapping)
+
+
 def _find_ids_field_on_query(query_cls: type, key_type: type) -> str | None:
     """Find a field on the query class typed as ``Iterable[K]`` matching the dict's key type."""
     for field_name, field_info in query_cls.model_fields.items():  # type: ignore[attr-defined]
@@ -114,7 +138,11 @@ class QueryAnnotation:
 
         if self.query_type is not None:
             expected_return = extract_query_return_type(self.query_type)
-            if expected_return is not None and self.return_type != expected_return:
+            if (
+                expected_return is not None
+                and self.return_type != expected_return
+                and not _is_row_shaped(self.return_type)
+            ):
                 raise QueryRegistrationError(
                     f'@query {original_func.__name__}: return type {self.return_type} '
                     f'does not match {self.query_type.__name__}[{expected_return}]',
@@ -134,6 +162,33 @@ class QueryAnnotation:
                 self.ids_param_name = _find_ids_field_on_query(self.query_type, key_type)
             else:
                 self.ids_param_name = _find_ids_param(hints, key_type)
+
+        # Lazy auto-wrap classification — populated on first access via
+        # ``auto_wrap``. Lazy because a model referenced as a return type may
+        # not be fully constructed yet when the @queries decorator fires
+        # (e.g. forward references resolved later in a module).
+        self._auto_wrap_cache: tuple[Any, ...] = ()
+
+    @property
+    def auto_wrap(self) -> tuple[str, Any] | None:
+        """Whether handler results should be auto-wrapped via ``validate_batch``.
+
+        Source of truth is ``Query[T].T`` — the *output* contract — not the
+        handler's own return annotation. Lets handlers honestly declare
+        ``-> list[dict[str, Any]]`` for a rows-shaped body while the
+        framework validates to ``Model`` at the dispatch boundary.
+
+        Returns ``None`` for ``dict[K, V]``-returning queries and for models
+        without transformer fields. Cached on first access.
+        """
+        if not self._auto_wrap_cache:
+            from fastbff.batch import classify_auto_wrap
+
+            target = extract_query_return_type(self.query_type) if self.query_type is not None else None
+            if target is None:
+                target = self.return_type
+            self._auto_wrap_cache = (classify_auto_wrap(target),)
+        return self._auto_wrap_cache[0]
 
     def __repr__(self) -> str:
         func_name = getattr(self.original_func, '__name__', str(self.original_func))
