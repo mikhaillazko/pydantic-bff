@@ -183,6 +183,47 @@ def test_include_router_raises_on_duplicate_function() -> None:
         app.include_router(router)
 
 
+def test_query_annotations_is_read_only_view() -> None:
+    """``app.query_annotations`` must not let callers mutate the live registry."""
+    # Arrange
+    app = FastBFF()
+
+    class FetchUsers(Query[dict[int, User]]):
+        ids: frozenset[int]
+
+    @app.queries
+    def fetch_users(args: FetchUsers) -> dict[int, User]:
+        return {}
+
+    annotations = app.query_annotations
+
+    # Act & Assert — the live view sees registered queries...
+    assert FetchUsers in annotations
+
+    # ...but cannot be mutated through the property.
+    with pytest.raises(TypeError):
+        annotations[object()] = None  # type: ignore[index]
+
+
+def test_query_annotations_view_reflects_later_registrations() -> None:
+    """The view is live, not a snapshot — new ``@queries`` show up automatically."""
+    # Arrange
+    app = FastBFF()
+    annotations = app.query_annotations
+    assert len(annotations) == 0
+
+    class FetchUsers(Query[dict[int, User]]):
+        ids: frozenset[int]
+
+    # Act
+    @app.queries
+    def fetch_users(args: FetchUsers) -> dict[int, User]:
+        return {}
+
+    # Assert
+    assert FetchUsers in annotations
+
+
 def test_include_router_raises_on_duplicate_transformer() -> None:
     """Mirrors the queries-side check: a transformer registered on both the
     router and the app must surface as a loud composition-time error rather

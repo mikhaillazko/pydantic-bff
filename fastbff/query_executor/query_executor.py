@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from collections.abc import Iterable
+from collections.abc import Mapping
 from inspect import Signature
 from typing import Any
 
@@ -29,7 +30,7 @@ class QueryExecutor:
 
     def __init__(
         self,
-        query_annotations: dict[type, QueryAnnotation],
+        query_annotations: Mapping[type, QueryAnnotation],
         *,
         resolved_deps: dict[str, Any] | None = None,
         handler_index: dict[Callable, dict[str, Any]] | None = None,

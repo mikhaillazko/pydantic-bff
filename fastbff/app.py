@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from collections.abc import Mapping
 from contextlib import AsyncExitStack
 from functools import wraps
+from types import MappingProxyType
 from typing import Annotated
 from typing import Any
 from typing import get_origin
@@ -69,14 +71,20 @@ class FastBFF:
         return self._overrides
 
     @property
-    def query_annotations(self) -> dict[type, QueryAnnotation]:
+    def query_annotations(self) -> Mapping[type, QueryAnnotation]:
         """The ``query_type → QueryAnnotation`` index built by ``@queries`` registrations.
 
-        Stable enough for tests / mocks to consume directly — pass it to
-        :class:`QueryExecutorMock` or to a hand-built :class:`QueryExecutor`
-        instead of reaching into ``app._query_annotations``.
+        Returned as a read-only ``MappingProxyType`` view over the live
+        registry — callers can iterate and look up entries, but cannot
+        mutate the index out from under the app. New ``@queries``
+        registrations show up automatically because the view is live, not
+        a snapshot.
+
+        Pass this to :class:`QueryExecutorMock` or a hand-built
+        :class:`QueryExecutor` instead of reaching into
+        ``app._query_annotations``.
         """
-        return self._query_annotations
+        return MappingProxyType(self._query_annotations)
 
     def queries[F: Callable](self, func_or_query_type: F | type[Query]) -> F | Callable[[F], F]:
         """Register *func* as a ``@query`` handler.

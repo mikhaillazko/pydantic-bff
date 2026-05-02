@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Any
 from typing import cast
 
@@ -14,7 +15,7 @@ class QueryExecutorMock(QueryExecutor):
 
     def __init__(
         self,
-        query_annotations: dict[type, QueryAnnotation],
+        query_annotations: Mapping[type, QueryAnnotation],
     ) -> None:
         super().__init__(
             query_annotations,
