@@ -93,7 +93,8 @@ def transform_owner_id_to_user(
     batch: BatchArg[int],
     query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
 ) -> UserDTO | None:
-    return query_executor.fetch(FetchUsers(ids=batch.ids)).get(owner_id)
+    users_map = query_executor.fetch(FetchUsers(ids=batch.ids))
+    return users_map.get(owner_id)
 
 
 UserTransformerAnnotated = build_transform_annotated(transform_owner_id_to_user)
