@@ -179,7 +179,7 @@ registers it and returns the function unchanged — directly callable in tests. 
 def transform_user_id(
     user_id: int,
     query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-) -> User | None:
+) -> UserDTO | None:
   ...
 
 
@@ -207,13 +207,13 @@ by Phase 1 of `validate_batch(...)`:
 
 ```python
 @app.transformer
-def transform_owner(
-    owner_id: int,
+def transform_user_id(
+    user_id: int,
     batch: BatchArg[int],            # all ids for this field on the current page
     query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-) -> User | None:
+) -> UserDTO | None:
     users = query_executor.fetch(FetchUsers(ids=batch.ids))
-    return users.get(owner_id)
+    return users.get(user_id)
 ```
 
 The first row's `executor.fetch(FetchUsers(ids=batch.ids))` issues the bulk call;
@@ -231,7 +231,7 @@ handler / transformer at dispatch time.
 
 ```python
 @app.queries
-def fetch_users(args: FetchUsers, session: DBSession) -> dict[int, User]:
+def fetch_users(args: FetchUsers, session: DBSession) -> dict[int, UserDTO]:
     # `session: DBSession` is Annotated[Session, Depends(get_session)] elsewhere
     ...
 
@@ -278,14 +278,14 @@ from fastbff import FastBFF, QueryRouter
 router = QueryRouter()
 
 @router.queries
-def fetch_users(args: FetchUsers) -> dict[int, User]: ...
+def fetch_users(args: FetchUsers) -> dict[int, UserDTO]: ...
 
 @router.transformer
-def transform_owner(
-    owner_id: int,
+def transform_user_id(
+    user_id: int,
     batch: BatchArg[int],
     query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-) -> User | None: ...
+) -> UserDTO | None: ...
 
 # main.py
 app = FastBFF()
@@ -340,35 +340,36 @@ fastapi_app = FastAPI()
 
 
 class FetchUsers(Query[dict[int, User]]):
-    ids: frozenset[int]
+  ids: frozenset[int]
 
 
 @app.queries
-def fetch_users(args: FetchUsers, session: DBSession) -> dict[int, User]:
-    stmt = select(UserRow).where(UserRow.id.in_(args.ids))
-    rows = session.execute(stmt).scalars().all()
-    return {row.id: User(id=row.id, name=row.name) for row in rows}
+def fetch_users(args: FetchUsers, session: DBSession) -> dict[int, UserDTO]:
+  stmt = select(UserRow).where(UserRow.id.in_(args.ids))
+  rows = session.execute(stmt).scalars().all()
+  return {row.id: UserDTO(id=row.id, name=row.name) for row in rows}
 
 
 @app.transformer
-def transform_owner(
-    owner_id: int,
+def transform_user_id(
+    user_id: int,
     batch: BatchArg[int],
     query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
 ) -> User | None:
-    return query_executor.fetch(FetchUsers(ids=batch.ids)).get(owner_id)
+  users_map = query_executor.fetch(FetchUsers(ids=batch.ids))
+  return users_map.get(user_id)
 
 
-UserTransformerAnnotated = build_transform_annotated(transform_owner)
+UserTransformerAnnotated = build_transform_annotated(transform_user_id)
 
 
 class TeamDTO(BaseModel):
-    id: int
-    owner: UserTransformerAnnotated
+  id: int
+  owner: UserTransformerAnnotated
 
 
 class FetchTeams(Query[list[TeamDTO]]):
-    pass
+  pass
 
 
 @app.queries(FetchTeams)
@@ -380,7 +381,7 @@ def fetch_teams(session: DBSession) -> list[dict[str, Any]]:
 def list_teams(
     query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
 ) -> list[TeamDTO]:
-    return query_executor.fetch(FetchTeams())
+  return query_executor.fetch(FetchTeams())
 ```
 
 The `fetch_teams` handler honestly returns rows. fastbff reads `Query[list[TeamDTO]]`
@@ -436,9 +437,9 @@ real `@queries` handler:
 from fastbff import QueryExecutorMock
 
 mock = QueryExecutorMock(query_annotations=app.query_annotations)
-mock.stub_query(FetchUsers, {10: User(id=10, name='u10')})
+mock.stub_query(FetchUsers, {10: UserDTO(id=10, name='u10')})
 
-assert mock.fetch(FetchUsers(ids=frozenset({10}))) == {10: User(id=10, name='u10')}
+assert mock.fetch(FetchUsers(ids=frozenset({10}))) == {10: UserDTO(id=10, name='u10')}
 mock.reset_mock()  # clear stubs; subsequent fetch() calls hit real @queries handlers
 ```
 
