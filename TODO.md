@@ -6,6 +6,8 @@ adopt it without footguns. North star is **simple to use, hard to misuse**.
 Items are ordered by user-impact, not implementation cost. Each one calls out
 the file/symbol to touch so the next contributor can start without a re-review.
 
+Completed items have been removed; check `git log` for the fix details.
+
 ---
 
 ## P0 — credibility blockers (a new user gives up in 30 seconds)
@@ -23,44 +25,16 @@ the file/symbol to touch so the next contributor can start without a re-review.
   in the project root — actual path is `integration_tests/`.
 
 **Fix**: rewrite the affected sections to match the real public surface
-(`fastbff/__init__.py`, `fastbff/exceptions.py`). Treat the public exception
-list as the source of truth — either add the missing exception types or
-delete the doc lines.
+(`fastbff/__init__.py`, `fastbff/exceptions.py`). Treat the public
+exception list as the source of truth — either add the missing exception
+types or delete the doc lines.
 
-### 2. `from __future__ import annotations` silently degrades the framework — DONE
+While you're in the README, also add a "Module organisation" note: under
+PEP 563, models/transformers/queries that reference local-scope names
+won't resolve through `typing.get_type_hints` — declare them at module
+level. This matches Pydantic's own constraint.
 
-`fastbff/transformer/inspection.py:26` used to call `inspect.get_annotations(cls)`
-with no `eval_str=True`. Under PEP 563, every annotation arrived as a
-string, `get_origin(...)` returned `None`, no `BatchInfo` entries were
-produced, and the framework silently fell back to per-row dispatch — or
-raised `BatchContextMissingError` with no obvious cause. The same problem
-existed in `_iter_depends_params` (`fastbff/di.py`), `find_arg_info`
-(`fastbff/reflection.py`), and the `has_info_arg` check
-(`fastbff/transformer/types.py`).
-
-**Fix landed**:
-- `fastbff/transformer/inspection.py` — switched to
-  `get_type_hints(cls, include_extras=True)` (also walks MRO, so this
-  partially addresses #5).
-- `fastbff/reflection.py` — added `cached_type_hints(func)` that wraps
-  `typing.get_type_hints(func, include_extras=True)` with a defensive
-  `try/except`. `find_arg_info` now reads through it.
-- `fastbff/di.py` — `_iter_depends_params` reads through `cached_type_hints`.
-- `fastbff/transformer/types.py` — `has_info_arg` reads through
-  `cached_type_hints` so the `ValidationInfo` identity check still works
-  when the annotation is a string.
-- `fastbff/transformer/pep563_test.py` — new regression module declared
-  with `from __future__ import annotations`, asserting both
-  `populate_context_with_batch` and a full Plan/Fetch/Merge through
-  `@app.entrypoint` work.
-
-**Known remaining caveat**: `typing.get_type_hints` resolves names against
-the function/class's *module globals*. Models, transformers, and queries
-declared inside a function body and referencing other locals will still
-fail to resolve under PEP 563 — this matches Pydantic's own constraint.
-Document this in the README under "Module organisation".
-
-### 3. Async handlers and transformers are accepted but broken
+### 2. Async handlers and transformers are accepted but broken
 
 `QueryExecutor.fetch` (`fastbff/query_executor/query_executor.py:61`) and
 `TransformerAnnotation._validate` (`fastbff/transformer/types.py:116`)
@@ -79,7 +53,7 @@ Larger scope — track separately once the rejection is in.
 
 ## P1 — silent footguns
 
-### 4. `bind()` after `mount()` does not propagate
+### 3. `bind()` after `mount()` does not propagate
 
 `FastBFF.mount` (`fastbff/app.py:189`) does
 `fastapi_app.dependency_overrides.update(self._overrides)` — a one-shot
@@ -92,29 +66,7 @@ Users (especially in tests) expect post-mount binds to take effect.
   prefer rewriting `bind` to write to both if mounted).
 - Or document loudly + raise on `bind` after `mount`.
 
-### 5. Inherited transformer fields are skipped — DONE
-
-Two layers of bug:
-
-- `introspect_model_transformers` used to read `get_annotations(cls)` which
-  only looks at class-level annotations. **Already fixed by #2** —
-  `get_type_hints(cls, include_extras=True)` walks the MRO and merges
-  parent annotations.
-- `get_model_batches` (`fastbff/transformer/batcher.py`) used
-  `getattr(cls, '__batches__', None)` which walks the MRO too — so once a
-  parent was introspected, every subclass silently inherited the parent's
-  cached list and skipped its own introspection. Any subclass-only
-  transformer field would silently drop out of bulk fetching.
-
-**Fix landed**:
-- `fastbff/transformer/batcher.py` — `get_model_batches` reads through
-  `cls.__dict__.get(...)` so the cache lookup is per-class.
-- `fastbff/transformer/inheritance_test.py` — three regression tests:
-  inherited field discovery, the cache-short-circuit case (parent
-  introspected first), and a full Plan/Fetch/Merge through an
-  inheriting DTO.
-
-### 6. `_to_hashable` blows up on common Pydantic shapes
+### 4. `_to_hashable` blows up on common Pydantic shapes
 
 `fastbff/query_executor/query_cache.py:50` does not handle Pydantic
 `BaseModel`, `datetime`, `UUID`, dataclasses, etc. The first time a user
@@ -125,7 +77,7 @@ nests a model inside a `Query` field, the cache key construction raises
 (`v.model_dump(mode='python')` then recurse) and dataclasses, and raise
 `FastBFFError` with a guidance message for anything else still unhashable.
 
-### 7. `include_router` dedup is inconsistent
+### 5. `include_router` dedup is inconsistent
 
 `FastBFF.include_router` (`fastbff/app.py:125`) raises
 `QueryRegistrationError` on duplicate queries but silently overwrites
@@ -133,7 +85,7 @@ duplicate transformers. Pick one rule and apply it both ways. (Probably
 "raise on duplicate transformer" — silent overwrite is the worse failure
 mode.)
 
-### 8. `transformer_callable(...)` is sold as a clean test path but isn't
+### 6. `transformer_callable(...)` is sold as a clean test path but isn't
 
 The README quickstart says:
 
@@ -154,12 +106,12 @@ parameter by hand. Either:
 
 ## P2 — packaging and release process
 
-### 9. `pyproject.toml` status is `Alpha` and version is `0.1.0`
+### 7. `pyproject.toml` status is `Alpha` and version is `0.1.0`
 
 `pyproject.toml:13`. For "wide developer use" this signals "do not depend
 on this." Decide what stability bar we are committing to and bump.
 
-### 10. `publish.yml` has no tag/version guard
+### 8. `publish.yml` has no tag/version guard
 
 `.github/workflows/publish.yml` runs `uv publish` on any release event
 without checking the git tag matches `pyproject.toml` `version`, and
@@ -169,13 +121,13 @@ without a TestPyPI dry-run.
 - Add a step that fails if `pyproject.toml` `version` != `${GITHUB_REF_NAME#v}`.
 - Optionally add a manual-dispatch TestPyPI workflow before promoting.
 
-### 11. No `__version__` constant
+### 9. No `__version__` constant
 
 `fastbff/__init__.py` should expose `__version__` (read from package
 metadata via `importlib.metadata.version("fastbff")` so it stays in sync
 with `pyproject.toml`).
 
-### 12. No `CHANGELOG.md`, no `CONTRIBUTING.md`, no docs site
+### 10. No `CHANGELOG.md`, no `CONTRIBUTING.md`, no docs site
 
 For wide adoption:
 - `CHANGELOG.md` (Keep-a-Changelog format) so users can scan before
@@ -185,7 +137,7 @@ For wide adoption:
 - Optional but recommended: a docs site (mkdocs-material) for the
   cookbook + reference, separate from the README.
 
-### 13. Internal FastAPI APIs in `_run_entrypoint`
+### 11. Internal FastAPI APIs in `_run_entrypoint`
 
 `fastbff/app.py:223-243` constructs scope keys (`fastapi_inner_astack`,
 `fastapi_function_astack`) that are FastAPI-internal and post-0.112.
@@ -197,7 +149,7 @@ path will fail on 0.100-0.111.
   that has both keys is — verify, don't guess).
 - Add an integration test pinned to that floor in CI.
 
-### 14. `requires-python = ">=3.12"` excludes the bulk of production fleets
+### 12. `requires-python = ">=3.12"` excludes the bulk of production fleets
 
 PEP 695 generics (`class Query[T]`) lock out Python 3.10/3.11. If wide
 adoption is the goal, support 3.11 by rewriting the generics with
@@ -224,13 +176,11 @@ the README.
 
 ## Test coverage gaps
 
-These are the cases that bite first-time users; we should have at least
-one regression test per row:
+Cases that bite first-time users; we should have at least one regression
+test per row:
 
 - Async handler / async transformer (rejected at registration with a
   clear error).
-- Model declared in a module with `from __future__ import annotations`.
-- Transformer field inherited from a parent BaseModel.
 - `Query` with a nested Pydantic model field (cache key path).
 - `validate_batch` over a large page (sanity / performance smoke).
 - `bind()` called after `mount()` (whatever the chosen semantics).
