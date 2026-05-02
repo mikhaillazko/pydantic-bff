@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from fastbff.exceptions import QueryRegistrationError
+from fastbff.exceptions import TransformerRegistrationError
 from fastbff.query_executor.query import Query
 
 
@@ -83,3 +84,35 @@ def test_explicit_query_type_mismatch_raises(query_router) -> None:
         @query_router.queries(FetchAllEntities)
         def mismatched(query_args: FetchPlainQuery) -> PlainResult:
             return PlainResult(value=query_args.key)
+
+
+def test_router_raises_on_duplicate_query_function(query_router) -> None:
+    """Re-registering the same function as a query on a single router raises."""
+
+    # Arrange
+    def fetch_plain(query_args: FetchPlainQuery) -> PlainResult:
+        return PlainResult(value=query_args.key)
+
+    query_router.queries(fetch_plain)
+
+    # Act & Assert
+    with pytest.raises(QueryRegistrationError, match='Duplicate @queries registration'):
+        query_router.queries(fetch_plain)
+
+
+def test_router_raises_on_duplicate_transformer_function(query_router) -> None:
+    """Re-registering the same function as a transformer on a single router raises.
+
+    Mirrors the ``@queries`` rule: silent overwrite is the worse failure
+    mode because the second registration takes effect without any signal.
+    """
+
+    # Arrange
+    def transform_value(value: str) -> str:
+        return value
+
+    query_router.transformer(transform_value)
+
+    # Act & Assert
+    with pytest.raises(TransformerRegistrationError, match='Duplicate @transformer registration'):
+        query_router.transformer(transform_value)

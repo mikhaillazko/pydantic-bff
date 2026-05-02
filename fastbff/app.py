@@ -31,6 +31,7 @@ from .di import build_provide_query_executor
 from .di import collect_dep_specs
 from .exceptions import QueryNotRegisteredError
 from .exceptions import QueryRegistrationError
+from .exceptions import TransformerRegistrationError
 from .query_executor.query import Query
 from .query_executor.query_annotation import QueryAnnotation
 from .query_executor.query_annotation import _is_query_subclass
@@ -126,7 +127,11 @@ class FastBFF:
         """Merge *router*'s registrations into this app.
 
         Raises :class:`QueryRegistrationError` on duplicate registration of
-        the same :class:`Query` subclass or function.
+        the same :class:`Query` subclass or query function, and
+        :class:`TransformerRegistrationError` on duplicate registration of
+        the same transformer function. Both checks fire at composition
+        time so copy-paste collisions cannot silently replace a previously
+        registered handler.
         """
         for func, annotation in router._query_func_annotations_registry.items():
             if func in self._router._query_func_annotations_registry:
@@ -144,6 +149,11 @@ class FastBFF:
             self._router._query_func_annotations_registry[func] = annotation
 
         for func, transformer_annotation in router._transformer_func_annotation_registry.items():
+            if func in self._router._transformer_func_annotation_registry:
+                raise TransformerRegistrationError(
+                    f'Duplicate @transformer registration for function {func.__name__!r} '
+                    f'when including router into FastBFF app.',
+                )
             self._router._transformer_func_annotation_registry[func] = transformer_annotation
 
         self._invalidate_finalize()

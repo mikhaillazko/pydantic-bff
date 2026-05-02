@@ -8,6 +8,8 @@ its registrations become part of the union of handlers scanned by
 
 from collections.abc import Callable
 
+from .exceptions import QueryRegistrationError
+from .exceptions import TransformerRegistrationError
 from .query_executor.query import Query
 from .query_executor.query_annotation import QueryAnnotation
 from .query_executor.query_annotation import _is_query_subclass
@@ -69,12 +71,26 @@ class QueryRouter:
         return decorator
 
     def _register[F: Callable](self, func: F, explicit_query_type: type[Query] | None = None) -> F:
+        if func in self._query_func_annotations_registry:
+            raise QueryRegistrationError(
+                f'Duplicate @queries registration for function {func.__name__!r}.',
+            )
         annotation = QueryAnnotation(original_func=func, explicit_query_type=explicit_query_type)
         self._query_func_annotations_registry[func] = annotation
         return func
 
     def transformer[F: Callable](self, func: F) -> F:
-        """Register *func* as a ``@transformer`` handler on this router."""
+        """Register *func* as a ``@transformer`` handler on this router.
+
+        Re-registering the same function raises
+        :class:`TransformerRegistrationError` — same rule as ``@queries`` so
+        copy-paste duplicates surface at composition time, not as a silently
+        replaced transformer.
+        """
+        if func in self._transformer_func_annotation_registry:
+            raise TransformerRegistrationError(
+                f'Duplicate @transformer registration for function {func.__name__!r}.',
+            )
         transformer_annotation = TransformerAnnotation(original_func=func)
         setattr(func, _TRANSFORMER_ANNOTATION_ATTR, transformer_annotation)
         self._transformer_func_annotation_registry[func] = transformer_annotation

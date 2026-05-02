@@ -16,6 +16,7 @@ from fastbff import QueryRouter
 from fastbff import build_transform_annotated
 from fastbff import validate_batch
 from fastbff.exceptions import QueryRegistrationError
+from fastbff.exceptions import TransformerRegistrationError
 
 
 @dataclass(frozen=True)
@@ -179,6 +180,26 @@ def test_include_router_raises_on_duplicate_function() -> None:
     router.queries(fetch_users)
     with pytest.raises(QueryRegistrationError, match='Duplicate @queries registration'):
         app.queries(fetch_users)
+        app.include_router(router)
+
+
+def test_include_router_raises_on_duplicate_transformer() -> None:
+    """Mirrors the queries-side check: a transformer registered on both the
+    router and the app must surface as a loud composition-time error rather
+    than silently overwriting the previous registration.
+    """
+    # Arrange
+    router = QueryRouter()
+    app = FastBFF()
+
+    def transform_owner(owner_id: int) -> int:
+        return owner_id
+
+    router.transformer(transform_owner)
+    app.transformer(transform_owner)
+
+    # Act & Assert
+    with pytest.raises(TransformerRegistrationError, match='Duplicate @transformer registration'):
         app.include_router(router)
 
 
