@@ -77,11 +77,11 @@ def transform_owner(
     users = query_executor.fetch(FetchUsers(ids=batch.ids))
     return users.get(owner_id)
 
-OwnerTransformerAnnotated = build_transform_annotated(transform_owner)
+UserTransformerAnnotated = build_transform_annotated(transform_owner)
 
 class TeamDTO(BaseModel):
     id: int
-    owner: OwnerTransformerAnnotated
+    owner: UserTransformerAnnotated
 
 # --- Page-rendering query --------------------------------------------------
 # `Query[list[TeamDTO]]` is the output contract; the handler returns honest
@@ -182,10 +182,10 @@ def transform_owner(
 ) -> User | None:
     ...
 
-OwnerTransformerAnnotated = build_transform_annotated(transform_owner)
+UserTransformerAnnotated = build_transform_annotated(transform_owner)
 
 class TeamDTO(BaseModel):
-    owner: OwnerTransformerAnnotated
+    owner: UserTransformerAnnotated
 ```
 
 The return type baked into the alias is exactly the function's declared return type
@@ -194,7 +194,7 @@ like:
 
 ```python
 class CommentDTO(BaseModel):
-    author: OwnerTransformerAnnotated
+    author: UserTransformerAnnotated
 ```
 
 For unit testing, call the transformer function directly — `@app.transformer`
