@@ -176,14 +176,12 @@ class CommentDTO(BaseModel):
     author: OwnerTransformerAnnotated
 ```
 
-For unit testing, recover the DI-wrapped underlying callable with
-`transformer_callable`:
+For unit testing, call the transformer function directly — `@app.transformer`
+returns it unchanged. You construct any `Annotated[..., Depends(...)]`
+parameters yourself (e.g. pass a stub `QueryExecutor`):
 
 ```python
-from fastbff import transformer_callable
-
-call = transformer_callable(transform_owner)
-assert call(owner_id=1, query_executor=fake) == User(id=1, name='…')
+assert transform_owner(owner_id=1, query_executor=fake) == User(id=1, name='…')
 ```
 
 ### `BatchArg[T]`

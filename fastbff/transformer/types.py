@@ -93,7 +93,6 @@ class TransformerAnnotation:
             for param_name, param in call_sign.parameters.items()
         )
         self.original_func = original_func
-        self.call = original_func
         self.return_type = return_type
         self.batch_fetch_type: type | None = None
         if batch_arg_cls is not None:

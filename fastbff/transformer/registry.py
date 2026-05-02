@@ -22,12 +22,6 @@ def build_transform_annotated(func: Callable) -> Any:
     return Annotated[transformer_annotation.return_type, transformer_annotation]
 
 
-def transformer_callable(func_or_field: Any) -> Callable | None:
-    """Return the underlying callable for a ``@transformer`` function or alias."""
-    transformer_annotation = transformer_metadata(func_or_field)
-    return transformer_annotation.call if transformer_annotation is not None else None
-
-
 def transformer_metadata(func_or_field: Any) -> TransformerAnnotation | None:
     """Return the :class:`TransformerAnnotation` for a transformer or field annotation."""
     direct = getattr(func_or_field, _TRANSFORMER_ANNOTATION_ATTR, None)

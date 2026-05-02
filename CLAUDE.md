@@ -64,7 +64,7 @@ Setting `QueryExecutor.__signature__ = Signature([])` at module bottom is load-b
 - **Phase 1 — Plan.** `populate_context_with_batch` walks rows once and collects every unique id per `BatchArg`-aware transformer field into a `{batch_key: set[ids]}` validation context, then injects the `query_executor` into that context.
 - **Phase 2 — Merge.** `Model.model_validate(row, context=ctx)` for each row. `TransformerAnnotation.__get_pydantic_core_schema__` registers a `with_info_plain_validator_function` so each transformer runs as a Pydantic validator. The first row's `query_executor.fetch(...)` issues the bulk call; subsequent rows hit the entity-level cache.
 
-`build_transform_annotated(func)` returns `Annotated[ReturnType, transformer_annotation]` so the same transformer can be reused as a field type across multiple Pydantic models. The function is left unchanged and remains directly callable in tests; `transformer_callable` / `transformer_metadata` recover the underlying callable from a function or annotated field.
+`build_transform_annotated(func)` returns `Annotated[ReturnType, transformer_annotation]` so the same transformer can be reused as a field type across multiple Pydantic models. The function is left unchanged and remains directly callable in tests; `transformer_metadata` recovers the `TransformerAnnotation` from either a decorated function or an annotated field alias.
 
 ### Query type metadata (`QueryAnnotation`)
 

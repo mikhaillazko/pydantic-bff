@@ -30,8 +30,8 @@ Queries
 
 Test helpers
 ~~~~~~~~~~~~
-- :func:`transformer_callable` / :func:`transformer_metadata` — extract underlying
-  function or metadata from a ``@transformer`` function or annotated alias.
+- :func:`transformer_metadata` — extract the :class:`TransformerAnnotation`
+  attached to a ``@transformer`` function or an annotated field alias.
 
 Exceptions
 ~~~~~~~~~~
@@ -51,7 +51,6 @@ from .query_executor.query_executor import QueryExecutor
 from .query_executor.query_executor_mock import QueryExecutorMock
 from .router import QueryRouter
 from .transformer.registry import build_transform_annotated
-from .transformer.registry import transformer_callable
 from .transformer.registry import transformer_metadata
 from .transformer.types import BatchArg
 from .transformer.types import TransformerAnnotation
@@ -71,7 +70,6 @@ __all__ = [
     'TransformerAnnotation',
     'build_transform_annotated',
     # Test helpers
-    'transformer_callable',
     'transformer_metadata',
     # Exceptions
     'BatchContextMissingError',
