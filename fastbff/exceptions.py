@@ -43,8 +43,8 @@ class BatchContextMissingError(FastBFFError, RuntimeError):
     """Raised when a transformer with a ``BatchArg`` is invoked without a batching context.
 
     Almost always means a row was validated via plain ``Model.model_validate``
-    instead of going through a fastbff dispatch boundary. ``QueryExecutor.fetch``
-    and ``@FastBFF.entrypoint`` build the batch context automatically when the
+    instead of going through a fastbff dispatch boundary.
+    ``QueryExecutor.fetch`` builds the batch context automatically when the
     declared return type is a model with transformer fields — invoke the
-    handler/entrypoint instead of validating models by hand.
+    handler instead of validating models by hand.
     """

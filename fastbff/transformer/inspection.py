@@ -25,8 +25,7 @@ def introspect_model_transformers(cls: type[PydanticBaseModel]) -> None:
       ``BatchArg`` (drives ``populate_context_with_batch``).
     * ``cls.__has_transformers__`` — ``True`` if *any* field on the model
       carries a :class:`TransformerAnnotation`, even a non-batched one
-      (drives the auto-wrap decision in ``QueryExecutor.fetch`` /
-      ``@app.entrypoint``).
+      (drives the auto-wrap decision in ``QueryExecutor.fetch``).
 
     Invoked lazily on first use. Uses :func:`typing.get_type_hints` with
     ``include_extras=True`` so models declared in modules with

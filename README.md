@@ -8,8 +8,8 @@ monolithic systems.
 
 - **Declarative data composition** — describe the shape of a response once on a Pydantic
   model; fetching happens automatically.
-- **Zero orchestration boilerplate** — `@queries` handlers and `@app.entrypoint` functions
-  return raw rows; the framework runs Plan + Fetch + Merge at the dispatch boundary.
+- **Zero orchestration boilerplate** — `@queries` handlers return raw rows; the framework
+  runs Plan + Fetch + Merge at the dispatch boundary.
 - **Typed queries** — `Query[T]` carries its own return type, *or* register a plain
   function with a typed signature; both forms cache identically.
 - **Automatic N+1 avoidance** — transformers declare a `BatchArg[T]` and the framework
@@ -100,13 +100,21 @@ def fetch_teams() -> list[dict[str, Any]]:
         {'id': 3, 'owner': 10},  # duplicate id → still just one DB call
     ]
 
-# --- Drive offline (CLI / test) --------------------------------------------
+# --- Mount on FastAPI ------------------------------------------------------
 
-@app.entrypoint
-def render_teams_page(
+from fastapi import FastAPI
+
+fastapi_app = FastAPI()
+
+
+@fastapi_app.get('/teams', response_model=list[TeamDTO])
+def list_teams(
     query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
 ) -> list[TeamDTO]:
     return query_executor.fetch(FetchTeams())
+
+
+app.mount(fastapi_app)
 ```
 
 A single page of N rows issues **one** `fetch_users(...)` call — regardless of N, and
@@ -233,12 +241,6 @@ handler / transformer at dispatch time.
 @app.queries
 def fetch_users(args: FetchUsers, session: DBSession) -> dict[int, UserDTO]:
     # `session: DBSession` is Annotated[Session, Depends(get_session)] elsewhere
-    ...
-
-@app.entrypoint
-def handler() -> ...:
-    # `entrypoint` resolves Depends offline (no HTTP server) by driving
-    # FastAPI's solve_dependencies through a synthetic Request.
     ...
 ```
 
@@ -462,8 +464,8 @@ All errors raised by the library subclass `FastBFFError`:
 - `BatchContextMissingError` — transformer with a `BatchArg` was invoked
   without a batch context, almost always because a row was validated via
   plain `Model.model_validate` outside a fastbff dispatch boundary. Return
-  rows from a `@queries` handler or `@app.entrypoint` instead — the auto-
-  wrap builds the batch context for you.
+  rows from a `@queries` handler instead — the auto-wrap builds the batch
+  context for you.
 
 ## Development
 

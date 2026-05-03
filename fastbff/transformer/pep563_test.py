@@ -92,13 +92,9 @@ def test_render_pep563_module_issues_one_bulk_call() -> None:
     def _fetch_teams() -> list[dict[str, int]]:
         return [{'id': 1, 'owner': 10}, {'id': 2, 'owner': 20}, {'id': 3, 'owner': 10}]
 
-    @app.entrypoint
-    def render_page(
-        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-    ) -> list[_TeamDTO]:
-        return query_executor.fetch(_FetchTeams())
-
-    results = render_page()
+    provide_query_executor = app.finalize()
+    query_executor = provide_query_executor()
+    results = query_executor.fetch(_FetchTeams())
 
     assert len(_db_calls) == 1
     assert _db_calls[0] == frozenset({10, 20})

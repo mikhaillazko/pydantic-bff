@@ -43,9 +43,8 @@ CI matrix runs Python 3.12, 3.13, 3.14. The local pin is in `.python-version`.
 
 - `QueryRouter` (`fastbff/router.py`) is a pure registry — it collects `@router.queries` and `@router.transformer` callables with their `QueryAnnotation` / `TransformerAnnotation` metadata. No DI wiring.
 - `FastBFF` (`fastbff/app.py`) owns a single internal `QueryRouter`, the `query_type → QueryAnnotation` index, and the FastAPI `dependency_overrides` map. `app.include_router(router)` merges a router's registrations into the app and raises `QueryRegistrationError` on duplicates.
-- `FastBFF.finalize()` (called implicitly by `mount` and `entrypoint`) walks every registered handler, dedups their `Annotated[..., Depends(...)]` params, and synthesises a `provide_query_executor(**deps)` factory whose `__signature__` declares those deps as keyword-only parameters. FastAPI's `get_dependant` reads `__signature__`, so the synthetic factory plugs straight into FastAPI's resolver.
+- `FastBFF.finalize()` (called implicitly by `mount`) walks every registered handler, dedups their `Annotated[..., Depends(...)]` params, and synthesises a `provide_query_executor(**deps)` factory whose `__signature__` declares those deps as keyword-only parameters. FastAPI's `get_dependant` reads `__signature__`, so the synthetic factory plugs straight into FastAPI's resolver.
 - `app.mount(fastapi_app)` copies `dependency_overrides` (including `QueryExecutor → provide_query_executor`) into the user-owned FastAPI app. Endpoints then declare `Annotated[QueryExecutor, Depends(QueryExecutor)]` and FastAPI resolves a fresh executor per request.
-- `app.entrypoint(func)` runs `func` offline by driving `solve_dependencies` through a synthetic `Request` via `asyncio.run` — used for CLIs / scripts / tests that want full DI without an HTTP server.
 - Any registration call invalidates the finalised factory (`_invalidate_finalize`); finalize is idempotent and re-runs only when the handler set changes.
 
 ### `QueryExecutor` and the two cache layers

@@ -124,7 +124,7 @@ def test_subclass_introspection_not_short_circuited_by_parent_cache() -> None:
     )
 
 
-def test_inherited_transformer_field_renders_through_entrypoint() -> None:
+def test_inherited_transformer_field_renders_end_to_end() -> None:
     """End-to-end: Plan/Fetch/Merge over a subclass with parent-declared transformer."""
     app = FastBFF()
     db_calls: list[frozenset[int]] = []
@@ -160,13 +160,9 @@ def test_inherited_transformer_field_renders_through_entrypoint() -> None:
     def fetch_teams() -> list[dict[str, int]]:
         return [{'id': 1, 'owner': 10}, {'id': 2, 'owner': 20}, {'id': 3, 'owner': 10}]
 
-    @app.entrypoint
-    def render_page(
-        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-    ) -> list[TeamDTO]:
-        return query_executor.fetch(FetchTeams())
-
-    results = render_page()
+    provide_query_executor = app.finalize()
+    query_executor = provide_query_executor()
+    results = query_executor.fetch(FetchTeams())
 
     assert len(db_calls) == 1
     assert db_calls[0] == frozenset({10, 20})

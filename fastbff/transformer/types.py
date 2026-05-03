@@ -129,8 +129,8 @@ class TransformerAnnotation:
                 raise BatchContextMissingError(
                     f'Transformer {self.original_func.__name__!r} declares a BatchArg but no '
                     'validation context was provided. Return the rows from a `@queries` '
-                    'handler or `@FastBFF.entrypoint` whose declared return type is the '
-                    'model — fastbff will build the batch context at the dispatch boundary.',
+                    'handler whose declared return type is the model — fastbff will build '
+                    'the batch context at the dispatch boundary.',
                 )
             ids = info.context[self.batch_key]
             keyword[self.batch_arg_name] = BatchArg(ids=frozenset(ids))

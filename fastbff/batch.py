@@ -29,10 +29,10 @@ def validate_batch[ModelT: BaseModel](
     ``context["query_executor"]``; transformer dispatch reads the
     per-transformer resolved-dep map from it.
 
-    End user code does not normally call this — :class:`QueryExecutor` and
-    :meth:`FastBFF.entrypoint` invoke it automatically for handlers and
-    entrypoints whose declared return type is a :class:`pydantic.BaseModel`
-    (or ``list`` thereof) with transformer fields.
+    End user code does not normally call this — :class:`QueryExecutor`
+    invokes it automatically for handlers whose declared return type is a
+    :class:`pydantic.BaseModel` (or ``list`` thereof) with transformer
+    fields.
     """
     context = populate_context_with_batch(model, rows)
     context['query_executor'] = query_executor

@@ -6,28 +6,18 @@ synthesizes a ``provide_query_executor`` factory whose signature declares
 the union of every handler's ``Annotated[..., Depends(...)]`` params as
 keyword-only parameters. FastAPI resolves that graph once per request and
 hands the resolved values to the :class:`QueryExecutor`.
-
-Offline callers (scripts, tests) use :meth:`FastBFF.entrypoint`, which drives
-FastAPI's ``solve_dependencies`` through a synthetic ``Request`` via
-``asyncio.run``.
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from collections.abc import Mapping
-from contextlib import AsyncExitStack
-from functools import wraps
 from types import MappingProxyType
 from typing import Annotated
 from typing import Any
 from typing import get_origin
 
 from fastapi import Depends
-from fastapi import Request
-from fastapi.dependencies.utils import get_dependant
-from fastapi.dependencies.utils import solve_dependencies
 
 from .di import build_provide_query_executor
 from .di import collect_dep_specs
@@ -48,10 +38,10 @@ class FastBFF:
 
     1. Register handlers with ``@app.queries`` / ``@app.transformer`` (or
        merge a :class:`QueryRouter` via :meth:`include_router`).
-    2. Call :meth:`finalize` (implicitly via :meth:`mount` or
-       :meth:`entrypoint`) to synthesize the ``provide_query_executor``
-       factory from the union of all registered deps. Re-finalize is
-       supported; the factory is rebuilt if new handlers were added.
+    2. Call :meth:`finalize` (implicitly via :meth:`mount`) to synthesize
+       the ``provide_query_executor`` factory from the union of all
+       registered deps. Re-finalize is supported; the factory is rebuilt
+       if new handlers were added.
 
     Endpoints declare ``Annotated[QueryExecutor, Depends(QueryExecutor)]``.
     :meth:`mount` registers an override that points ``QueryExecutor`` at the
@@ -224,68 +214,6 @@ class FastBFF:
         provide = self.finalize()
         fastapi_app.dependency_overrides.update(self._overrides)
         return provide
-
-    def entrypoint[F: Callable](self, func: F) -> F:
-        """Wrap *func* as an offline entrypoint that resolves its ``Depends``.
-
-        Drives FastAPI's ``solve_dependencies`` via ``asyncio.run`` against
-        a synthetic ``Request``, applying the app's overrides (including the
-        ``QueryExecutor → provide_query_executor`` binding). Use for CLIs,
-        scripts, and tests that want ``@app.entrypoint`` ergonomics without
-        spinning up an HTTP server.
-        """
-
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            self.finalize()
-            return asyncio.run(self._run_entrypoint(func, args, kwargs))
-
-        return wrapper  # type: ignore[return-value]
-
-    async def _run_entrypoint(
-        self,
-        func: Callable,
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> Any:
-        dependant = get_dependant(path='/__entrypoint__', call=func)
-        async with AsyncExitStack() as stack, AsyncExitStack() as function_stack:
-            request = Request(
-                scope={
-                    'type': 'http',
-                    'method': 'GET',
-                    'path': '/__entrypoint__',
-                    'raw_path': b'/__entrypoint__',
-                    'query_string': b'',
-                    'headers': [],
-                    'fastapi_inner_astack': stack,
-                    'fastapi_function_astack': function_stack,
-                },
-            )
-            solved = await solve_dependencies(
-                request=request,
-                dependant=dependant,
-                async_exit_stack=stack,
-                embed_body_fields=False,
-                dependency_overrides_provider=self,
-            )
-            resolved_values = _extract_solved_values(solved)
-            if asyncio.iscoroutinefunction(func):
-                return await func(*args, **kwargs, **resolved_values)
-            return func(*args, **kwargs, **resolved_values)
-
-
-def _extract_solved_values(solved: Any) -> dict[str, Any]:
-    """Pull the resolved kwargs out of FastAPI's ``SolvedDependency`` / tuple.
-
-    FastAPI 0.112+ returns a ``SolvedDependency`` namedtuple/dataclass whose
-    first field is ``values``; older versions return a plain tuple whose
-    first element is the values dict.
-    """
-    values = getattr(solved, 'values', None)
-    if values is not None:
-        return values
-    return solved[0]
 
 
 # Re-export for typing ergonomics: ``Annotated[QueryExecutor, Depends(QueryExecutor)]``

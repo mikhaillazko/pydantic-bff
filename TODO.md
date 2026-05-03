@@ -32,7 +32,7 @@ they stay, the harder the upgrade story gets.
 
 Sites:
 
-- `fastbff/query_executor/query_executor.py:106` —
+- `fastbff/query_executor/query_executor.py:116` —
   `QueryExecutor.__signature__ = Signature(parameters=[])`. Forces
   FastAPI's `get_dependant` to ignore `__init__` params when an
   endpoint declares `Depends(QueryExecutor)`. The override to
@@ -42,44 +42,26 @@ Sites:
   `provide_query_executor.__signature__ = Signature(parameters=...)`.
   Synthesises a function signature listing the union of every
   registered handler's deps so FastAPI resolves them all at once.
-- `fastbff/app.py:29-30` — direct imports from
-  `fastapi.dependencies.utils` (`get_dependant`, `solve_dependencies`).
-  Both have changed argument lists across recent FastAPI releases.
-- `fastbff/app.py:261-262` — synthesises a `Request` with the scope
-  keys `fastapi_inner_astack` and `fastapi_function_astack` so
-  `solve_dependencies` does not raise. Both are FastAPI-internal,
-  introduced post-0.112; the `pyproject.toml` floor of
-  `fastapi>=0.100` is wrong — the entrypoint path will fail on
-  0.100-0.111.
-- `fastbff/app.py:_extract_solved_values` — version-shim for the two
-  return shapes of `solve_dependencies` (tuple vs `SolvedDependency`).
 
 **Rework — pick one (or layer them)**:
 
-1. **Lean only on FastAPI's public surface**. Replace the synthetic
-   `provide_query_executor` factory with a small Pydantic / FastAPI
-   sub-app that exposes the union of deps as a normal callable.
-   Resolve `QueryExecutor` itself through the standard
-   `dependency_overrides` mapping with no `__signature__` mutation —
-   the override key already handles the lookup. For offline use
-   (`@app.entrypoint`), call user-side dependency factories directly
-   from the resolved-deps map instead of driving FastAPI's
-   `solve_dependencies` through a fake `Request`.
-2. **Own the DI graph**. Walk the registered handlers ourselves,
+1. **Lean only on FastAPI's public surface**. Replace
+   `provide_query_executor.__signature__` mutation with an
+   `exec`-built function that has a real Python signature, so the
+   factory looks indistinguishable from a hand-written one.
+   `QueryExecutor.__signature__ = Signature([])` stays — it is
+   irreducible under the current DX where endpoints write
+   `Depends(QueryExecutor)`.
+2. **Own the DI graph**. Walk the registered handlers ourselves and
    resolve `Depends(...)` via a tiny container that understands
-   FastAPI-style `Annotated[..., Depends(factory)]` parameters, and
-   stop reaching into `fastapi.dependencies.utils` entirely. The
+   FastAPI-style `Annotated[..., Depends(factory)]` parameters. The
    resolver is small (we already have `collect_dep_specs`); the
-   payoff is no FastAPI version coupling at all.
-3. **Minimum-viable cleanup** if the larger rework is out of scope:
-   bump the floor to `fastapi>=0.112` (or whatever the lowest version
-   is that ships both scope keys — verify), pin it in CI, and add a
-   regression test that exercises `@app.entrypoint` against that
-   floor so the next FastAPI bump is a known-cost upgrade.
+   payoff is one fewer `__signature__` mutation and a stable internal
+   API that does not move with FastAPI releases.
 
-Whichever path is picked, the goal is: zero `__signature__ =` lines,
-zero imports from `fastapi.dependencies.utils`, zero hand-rolled
-`Request` scopes.
+Whichever path is picked, the goal is: at most one `__signature__ =`
+line (on `QueryExecutor`), and no other reaching into FastAPI
+internals.
 
 ---
 
@@ -152,9 +134,9 @@ For wide adoption:
   `@app.queries` is a subtle API split. Document the decision tree, or
   detect parameterless handlers and emit a clear error pointing at the
   explicit form when the user forgets.
-- `FastBFF` itself is usable as a `dependency_overrides_provider`
-  (used by `_run_entrypoint`). Document this — it makes custom test
-  harnesses easier. (Likely subsumed by the P0 #2 rework.)
+- `FastBFF` itself is usable as a `dependency_overrides_provider`.
+  Document this — it makes custom test harnesses easier. (Likely
+  subsumed by the P0 #2 rework.)
 
 ---
 

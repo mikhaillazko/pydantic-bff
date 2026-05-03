@@ -7,6 +7,8 @@ from typing import Literal
 
 import pytest
 from fastapi import Depends
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from fastbff import BatchArg
@@ -64,13 +66,9 @@ def test_bff_app_renders_a_transformer_field() -> None:
             {'id': 3, 'owner': 10},
         ]
 
-    @app.entrypoint
-    def render_page(
-        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-    ) -> list[TeamDTO]:
-        return query_executor.fetch(FetchTeams())
-
-    results = render_page()
+    provide_query_executor = app.finalize()
+    query_executor = provide_query_executor()
+    results = query_executor.fetch(FetchTeams())
 
     assert len(db_calls) == 1
     assert db_calls[0] == frozenset({10, 20})
@@ -132,14 +130,11 @@ def test_include_router_merges_queries_and_transformers() -> None:
     app = FastBFF()
     app.include_router(router)
 
-    @app.entrypoint
-    def get_team_list(
-        query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-    ) -> list[TeamDTO]:
-        return query_executor.fetch(FetchTeams(type='volleyball'))
+    provide_query_executor = app.finalize()
+    query_executor = provide_query_executor()
 
     # Act
-    results = get_team_list()
+    results = query_executor.fetch(FetchTeams(type='volleyball'))
 
     # Assert
     assert len(db_calls) == 1
@@ -286,11 +281,17 @@ def test_router_dependencies_resolve_through_app_after_include() -> None:
     def fetch_one() -> dict[str, str]:
         return {'greeting': 'world'}
 
-    @app.entrypoint
+    fastapi_app = FastAPI()
+
+    @fastapi_app.get('/one')
     def render_one(
         query_executor: Annotated[QueryExecutor, Depends(QueryExecutor)],
-    ) -> NameDTO:
-        return query_executor.fetch(FetchOne())
+    ) -> dict[str, str]:
+        result = query_executor.fetch(FetchOne())
+        return {'greeting': result.greeting.message}
 
-    result = render_one()
-    assert result.greeting == Greeting(message='stub hello world')
+    app.mount(fastapi_app)
+    response = TestClient(fastapi_app).get('/one')
+
+    assert response.status_code == 200
+    assert response.json() == {'greeting': 'stub hello world'}
