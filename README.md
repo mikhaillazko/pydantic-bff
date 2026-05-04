@@ -35,7 +35,7 @@ Runtime deps: `pydantic>=2`, `fastapi>=0.100`. Python 3.12+ (uses PEP 695 generi
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from fastapi import Depends
+from fastapi import Depends, FastAPI
 from pydantic import BaseModel
 
 from fastbff import (
@@ -43,6 +43,7 @@ from fastbff import (
     BatchArg,
     Query,
     QueryExecutor,
+    QueryRouter,
     build_transform_annotated,
 )
 
@@ -53,22 +54,22 @@ class User:
     id: int
     name: str
 
-# --- App --------------------------------------------------------------------
+# --- Router -----------------------------------------------------------------
 
-app = FastBFF()
+router = QueryRouter()
 
 # --- Bulk query -------------------------------------------------------------
 
 class FetchUsers(Query[dict[int, User]]):
     ids: frozenset[int]
 
-@app.queries
+@router.queries
 def fetch_users(args: FetchUsers) -> dict[int, User]:
     return {i: User(id=i, name=f'u{i}') for i in args.ids}
 
 # --- Transformer + Response model ------------------------------------------
 
-@app.transformer
+@router.transformer
 def transform_owner(
     owner_id: int,
     batch: BatchArg[int],
@@ -92,7 +93,7 @@ class TeamDTO(BaseModel):
 class FetchTeams(Query[list[TeamDTO]]):
     pass
 
-@app.queries(FetchTeams)
+@router.queries(FetchTeams)
 def fetch_teams() -> list[dict[str, Any]]:
     return [
         {'id': 1, 'owner': 10},
@@ -100,9 +101,7 @@ def fetch_teams() -> list[dict[str, Any]]:
         {'id': 3, 'owner': 10},  # duplicate id → still just one DB call
     ]
 
-# --- Mount on FastAPI ------------------------------------------------------
-
-from fastapi import FastAPI
+# --- HTTP route -------------------------------------------------------------
 
 fastapi_app = FastAPI()
 
@@ -113,7 +112,10 @@ def list_teams(
 ) -> list[TeamDTO]:
     return query_executor.fetch(FetchTeams())
 
+# --- Compose ----------------------------------------------------------------
 
+app = FastBFF()
+app.include_router(router)
 app.mount(fastapi_app)
 ```
 
