@@ -97,10 +97,9 @@ instead of patching `__signature__`:
 
 ```python
 src = (
-    "def provide_query_executor("
-    + ", ".join(f"{spec.name}: {ann_repr} = Depends({factory_repr})"
-                for spec in specs)
-    + "): return _build(...)"
+    'def provide_query_executor('
+    + ', '.join(f'{spec.name}: {ann_repr} = Depends({factory_repr})' for spec in specs)
+    + '): return _build(...)'
 )
 exec(src, globals_ns, local_ns)
 ```
@@ -138,7 +137,9 @@ def make_capturer(factory):
         value: Annotated[Any, Depends(factory)],
     ) -> None:
         request.state.fastbff_resolved[factory] = value
+
     return capturer
+
 
 # during app.mount(fastapi_app):
 deps = [Depends(make_capturer(f)) for f in self._unique_factories()]
@@ -297,6 +298,7 @@ def transform_owner(
     qe: Annotated[QueryExecutor, Depends(QueryExecutor)],
 ) -> User | None:
     return qe.fetch(FetchUsers(ids=batch.ids)).get(owner_id)
+
 
 # `FetchUsers` not registered → app.finalize() raises with a message
 # pointing at the transformer, instead of the first request to a route
