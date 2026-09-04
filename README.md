@@ -30,9 +30,8 @@ for modular monolithic systems.
 - **Routers** — register handlers locally on a `QueryRouter` and merge them into a `FastBFF`
   app with `app.include_router(router)`, mirroring FastAPI's `APIRouter`.
 
-> Upgrading from 0.2? See [`docs/migration/0.2-to-0.3.md`](docs/migration/0.2-to-0.3.md)
-> for the exact old→new mapping. `@transformer` / `BatchArg` / `build_transform_annotated`
-> are replaced by `Resolve`; `afetch` is gone (`fetch` is now a coroutine).
+> Upgrading? See the [0.3 → 0.4](docs/migration/0.3-to-0.4.md) or
+> [0.2 → 0.3](docs/migration/0.2-to-0.3.md) migration guide.
 
 ## Install
 
@@ -47,6 +46,7 @@ Runtime deps: `pydantic>=2`, `fastapi>=0.100`. Python 3.12+ (uses PEP 695 generi
 ```python
 from dataclasses import dataclass
 from typing import Annotated
+from typing import TypedDict
 
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel
@@ -90,22 +90,27 @@ def fetch_users(query: FetchUsers) -> dict[int, User]:
 
 class TeamDTO(BaseModel):
     id: int
-    owner: Annotated[User | None, Resolve(FetchUsers)]
+    owner: Annotated[User | None, Resolve(FetchUsers, source='owner_id')]
+
+
+class TeamRaw(TypedDict):
+    id: int
+    owner_id: int
 
 # --- Page-rendering query --------------------------------------------------
 # `Query[list[TeamDTO]]` is the output contract; the handler returns honest rows
-# (`list[dict]`) and the framework resolves + validates them to TeamDTO at the
+# (`list[TeamRaw]`) and the framework resolves + validates them to TeamDTO at the
 # dispatch boundary, planning a single bulk `fetch_users` call for the whole page.
 
 class FetchTeams(Query[list[TeamDTO]]):
     pass
 
 @router.queries(FetchTeams)
-def fetch_teams() -> list[dict]:
+def fetch_teams() -> list[TeamRaw]:
     return [
-        {'id': 1, 'owner': 10},
-        {'id': 2, 'owner': 20},
-        {'id': 3, 'owner': 10},  # duplicate id → still just one DB call
+        {'id': 1, 'owner_id': 10},
+        {'id': 2, 'owner_id': 20},
+        {'id': 3, 'owner_id': 10},  # duplicate id → still just one DB call
     ]
 
 # --- HTTP route -------------------------------------------------------------
@@ -134,8 +139,8 @@ app.mount(fastapi_app)
 ```
 
 A single page of N rows issues **one** `fetch_users(...)` call — regardless of N, and
-regardless of how many duplicate ids the rows contain. The handler honestly types its
-return as `list[dict]`; `Query[list[TeamDTO]]` is the *output* contract that the executor
+regardless of how many duplicate ids the rows contain. `TeamRaw` is the typed input
+contract and `Query[list[TeamDTO]]` is the resolved output contract that the executor
 honors after running the resolve pipeline.
 
 ## The resolve pipeline (under the hood)
@@ -161,6 +166,29 @@ pipeline as its own batch, so the one-bulk-fetch-per-field guarantee holds recur
 Handlers that already build model instances directly (e.g. `dict[int, User]` queries
 constructing `User(...)` per row) flow through unchanged — already-validated values are
 detected and the render is a no-op.
+
+### Typed raw rows
+
+A render handler produces relation keys while `QueryExecutor.fetch()` returns resolved
+values, so these are intentionally separate types. Declare the producer shape as a
+`TypedDict`; fastbff checks it against the output model at `finalize()`/`mount()`:
+
+```python
+class TeamRaw(TypedDict):
+    id: int
+    owner_id: int | None
+
+
+@router.queries(FetchTeams)
+def fetch_teams() -> list[TeamRaw]:
+    return [{'id': 1, 'owner_id': 10}]
+```
+
+Ordinary fields must match the output model. For a
+`Resolve(EntityQuery[K, V])` field, the raw source contains `K` (or a collection of `K`)
+while the output field contains `V`. A Pydantic model can be used instead of a
+`TypedDict` when runtime validation is worth the allocation. Broad `dict`/`Mapping`
+annotations remain supported for dynamic shapes, but are deliberately unchecked.
 
 ## Core concepts
 
@@ -253,12 +281,13 @@ plain model once the resolved values are substituted in. Resolvers are discovere
 automatically from the response models your queries return — there is no decorator to add.
 
 **Query form** — `Resolve(SomeEntityQuery)`. The raw row value for the field is a key (or
-an iterable of keys) into the `EntityQuery`'s `dict[K, V]` result:
+an iterable of keys) into the `EntityQuery`'s `dict[K, V]` result. Use `source=` when the
+raw key name differs from the output field name:
 
 ```python
 class TeamDTO(BaseModel):
     id: int
-    owner: Annotated[User | None, Resolve(FetchUsers)]   # key = raw row['owner']
+    owner: Annotated[User | None, Resolve(FetchUsers, source='owner_id')]
 ```
 
 **Resolver form** — `Resolve(resolver=fn)`, for custom logic (filtering, deriving keys, or
@@ -358,6 +387,7 @@ parameter as `Annotated[QueryExecutor, Depends(QueryExecutor)]` (async) or
 ```python
 from collections.abc import Iterator
 from typing import Annotated
+from typing import TypedDict
 
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel
@@ -402,7 +432,12 @@ def fetch_users(query: FetchUsers, session: DBSession) -> dict[int, UserDTO]:
 
 class TeamDTO(BaseModel):
     id: int
-    owner: Annotated[UserDTO | None, Resolve(FetchUsers)]
+    owner: Annotated[UserDTO | None, Resolve(FetchUsers, source='owner_id')]
+
+
+class TeamRaw(TypedDict):
+    id: int
+    owner_id: int
 
 
 class FetchTeams(Query[list[TeamDTO]]):
@@ -410,8 +445,8 @@ class FetchTeams(Query[list[TeamDTO]]):
 
 
 @app.queries(FetchTeams)
-def fetch_teams(session: DBSession) -> list[dict]:
-    return [dict(row) for row in session.execute(select(TeamRow)).mappings().all()]
+def fetch_teams(session: DBSession) -> list[TeamRaw]:
+    return [TeamRaw(id=row.id, owner_id=row.owner_id) for row in session.execute(select(TeamRow)).scalars()]
 
 
 @fastapi_app.get('/teams')
@@ -451,16 +486,15 @@ SqlalchemyConverterDep = Annotated[SqlalchemyConverter, Depends(make_sqlalchemy_
 
 
 @app.queries(FetchTeams)
-def fetch_teams(sqlalchemy_converter: SqlalchemyConverterDep) -> list[TeamDTO]:
-    statement = select(TeamRow.id, TeamRow.owner_id.label('owner'))
-    return sqlalchemy_converter.execute_all(statement, list[TeamDTO])
+def fetch_teams(sqlalchemy_converter: SqlalchemyConverterDep) -> list[TeamRaw]:
+    statement = select(TeamRow.id, TeamRow.owner_id)
+    return sqlalchemy_converter.execute_all(statement, TeamRaw)
 ```
 
-The converter executes the `Select` and projects rows into the shape the resolve pipeline
-expects — column labels in the `Select` must match field names on the target model
-(`owner_id` labelled `owner` so `Resolve(FetchUsers)` finds its key). The declared return
-type (`list[TeamDTO]`) describes what the *caller* receives after rendering; the converter
-is row-shaped under the hood. Use `execute_one` for `Query[Model]` (single-model) handlers.
+The converter validates SQLAlchemy mapping rows against `TeamRaw`; missing or mislabelled
+columns fail at this boundary. `Resolve(..., source='owner_id')` maps the raw key to the
+resolved `owner` output. Use `execute_one` for single-row handlers and `validate=False`
+only for a trusted, performance-sensitive path.
 
 ### Testing with `QueryExecutorMock`
 

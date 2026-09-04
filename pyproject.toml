@@ -1,7 +1,7 @@
 [project]
 name = "fastbff"
-version = "0.3.0"
-description = "Simple back-end for front-end using Pydantic. Declarative data composition with typed transformers, dependency injection, and automatic N+1 avoidance."
+version = "0.4.0"
+description = "Simple back-end for front-end using Pydantic. Typed data composition, dependency injection, and automatic N+1 avoidance."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -106,7 +106,7 @@ force-single-line = true
 quote-style = "single"
 
 [tool.ty.src]
-include = ["fastbff"]
+include = ["fastbff", "integration_tests/sample_app.py"]
 exclude = ["**/*_test.py"]
 
 [tool.ty.rules]

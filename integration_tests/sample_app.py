@@ -7,6 +7,7 @@ singletons. Tests import :data:`fastapi_app` and drive it through ``TestClient``
 
 from collections.abc import Iterator
 from typing import Annotated
+from typing import TypedDict
 
 from fastapi import Depends
 from fastapi import FastAPI
@@ -46,7 +47,7 @@ class UserRow(Base):
     name: Mapped[str]
 
 
-class TeamRow(Base):
+class TeamTable(Base):
     __tablename__ = 'teams'
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_id: Mapped[int]
@@ -107,7 +108,12 @@ def fetch_users(query: FetchUsers, session: DBSession) -> dict[int, UserDTO]:
 
 class TeamDTO(BaseModel):
     id: int
-    owner: Annotated[UserDTO | None, Resolve(FetchUsers)]
+    owner: Annotated[UserDTO | None, Resolve(FetchUsers, source='owner_id')]
+
+
+class TeamRaw(TypedDict):
+    id: int
+    owner_id: int
 
 
 class FetchTeams(Query[list[TeamDTO]]):
@@ -115,9 +121,9 @@ class FetchTeams(Query[list[TeamDTO]]):
 
 
 @query_router.queries(FetchTeams)
-def fetch_teams(sqlalchemy_converter: SqlalchemyConverterDep) -> list[TeamDTO]:
-    statement = select(TeamRow.id, TeamRow.owner_id.label('owner'))
-    return sqlalchemy_converter.execute_all(statement, list[TeamDTO])
+def fetch_teams(sqlalchemy_converter: SqlalchemyConverterDep) -> list[TeamRaw]:
+    statement = select(TeamTable.id, TeamTable.owner_id)
+    return sqlalchemy_converter.execute_all(statement, TeamRaw)
 
 
 # --- HTTP + mount -------------------------------------------------------------
