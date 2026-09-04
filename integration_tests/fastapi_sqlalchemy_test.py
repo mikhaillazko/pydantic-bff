@@ -9,7 +9,7 @@ covers the whole page even when rows share owner ids.
 import pytest
 from fastapi.testclient import TestClient
 from sample_app import Base
-from sample_app import TeamRow
+from sample_app import TeamTable
 from sample_app import UserRow
 from sample_app import db_engine
 from sample_app import fastapi_app
@@ -29,9 +29,9 @@ def engine() -> Engine:
             [
                 UserRow(id=10, name='u10'),
                 UserRow(id=20, name='u20'),
-                TeamRow(id=1, owner_id=10),
-                TeamRow(id=2, owner_id=20),
-                TeamRow(id=3, owner_id=10),
+                TeamTable(id=1, owner_id=10),
+                TeamTable(id=2, owner_id=20),
+                TeamTable(id=3, owner_id=10),
             ],
         )
         session.commit()

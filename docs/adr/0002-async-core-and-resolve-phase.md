@@ -226,3 +226,18 @@ with the plan/fetch/merge render pipeline, and explicit `EntityQuery` opt-in
 caching. The legacy transformer machinery (`@transformer`, `BatchArg`,
 `build_transform_annotated`, `validate_batch`, `afetch`) was removed. See
 `docs/migration/0.2-to-0.3.md`.
+
+## Amendment — typed raw-row contract (0.4.0)
+
+A render query has distinct raw-row and resolved-output contracts. `Query[T]`
+continues to denote only the resolved output returned by the executor. Handlers
+should return an explicitly typed raw mapping (`TypedDict` preferred), and
+fastbff validates that mapping against the output model at finalize time.
+
+For `Resolve(EntityQuery[K, V])`, the raw field must carry `K` (or an iterable
+of `K` for collection fields), while the output field carries `V`. An optional
+`source=` names the raw field when it differs from the output field. Broad
+`dict`/`Mapping` handler annotations remain an unchecked compatibility path.
+
+This makes the pre-render boundary visible to static tools without moving I/O
+back into Pydantic validation or changing `QueryExecutor.fetch(Query[T]) -> T`.

@@ -1,12 +1,20 @@
 import types as builtin_types
 from collections.abc import Callable
 from collections.abc import Iterable
+from collections.abc import Sequence
+from inspect import signature
+from typing import Annotated
 from typing import Any
+from typing import NotRequired
+from typing import Required
 from typing import TypeGuard
 from typing import Union
 from typing import get_args
 from typing import get_origin
 from typing import get_type_hints
+from typing import is_typeddict
+
+from pydantic import BaseModel
 
 from fastbff.exceptions import QueryRegistrationError
 
@@ -40,14 +48,15 @@ def extract_query_return_type(query_cls: type) -> Any | None:
 def _is_row_shaped(t: Any) -> bool:
     """Whether *t* is a 'rows' shape: ``list[Mapping]``, ``Mapping``, or close.
 
-    The render path lets a handler honestly declare ``-> list[dict[str, Any]]``
-    (or single ``Mapping``) and have the framework validate to ``Query[T].T``
-    at dispatch time. Anything else has to match ``Query[T].T`` exactly so
-    genuine model-mismatch bugs (handler returns ``Entity`` while query says
-    ``PlainResult``) still fail at registration.
+    TypedDict is the preferred checked form. Broad ``dict`` / ``Mapping``
+    annotations remain an unchecked compatibility path. Anything else has to
+    match ``Query[T].T`` exactly so genuine model-mismatch bugs still fail at
+    registration.
     """
     import collections.abc as collections_abc
 
+    if is_typeddict(t):
+        return True
     if t is dict or t is collections_abc.Mapping:
         return True
     origin = get_origin(t)
@@ -59,6 +68,174 @@ def _is_row_shaped(t: Any) -> bool:
             return False
         return _is_row_shaped(args[0])
     return isinstance(t, type) and issubclass(t, collections_abc.Mapping)
+
+
+def _is_pydantic_row(t: Any) -> bool:
+    row = _raw_row_type(t)
+    return isinstance(row, type) and issubclass(row, BaseModel)
+
+
+def _is_renderable_output(t: Any) -> bool:
+    from fastbff.resolve import classify_render
+
+    return classify_render(t) is not None
+
+
+def _raw_row_type(t: Any) -> Any | None:
+    """Return the item type from a single-row or ``list[row]`` annotation."""
+    if get_origin(t) is list:
+        args = get_args(t)
+        return args[0] if args else None
+    return t
+
+
+def _strip_annotated(t: Any) -> Any:
+    while get_origin(t) in (Annotated, Required, NotRequired):
+        t = get_args(t)[0]
+    return t
+
+
+def _allows_none(t: Any) -> bool:
+    t = _strip_annotated(t)
+    origin = get_origin(t)
+    return (origin is Union or isinstance(t, builtin_types.UnionType)) and type(None) in get_args(t)
+
+
+def _types_compatible(actual: Any, expected: Any) -> bool:
+    """Conservative static compatibility check for raw row annotations."""
+    actual = _strip_annotated(actual)
+    expected = _strip_annotated(expected)
+    if actual is Any or expected is Any or actual == expected:
+        return True
+
+    actual_origin = get_origin(actual)
+    expected_origin = get_origin(expected)
+    actual_union = actual_origin is Union or isinstance(actual, builtin_types.UnionType)
+    expected_union = expected_origin is Union or isinstance(expected, builtin_types.UnionType)
+    if actual_union:
+        return all(_types_compatible(member, expected) for member in get_args(actual))
+    if expected_union:
+        return any(_types_compatible(actual, member) for member in get_args(expected))
+    if actual_origin is not None or expected_origin is not None:
+        if actual_origin != expected_origin:
+            return False
+        actual_args = get_args(actual)
+        expected_args = get_args(expected)
+        return len(actual_args) == len(expected_args) and all(
+            _types_compatible(left, right) for left, right in zip(actual_args, expected_args, strict=True)
+        )
+    try:
+        return isinstance(actual, type) and isinstance(expected, type) and issubclass(actual, expected)
+    except TypeError:
+        return False
+
+
+def _resolver_key_type(resolver: Callable) -> Any | None:
+    hints = get_type_hints(resolver, include_extras=True)
+    parameters = tuple(signature(resolver).parameters)
+    if not parameters:
+        return None
+    annotation = hints.get(parameters[0])
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin in (set, frozenset, list, tuple) and args:
+        return args[0]
+    return None
+
+
+def _resolve_key_type(resolve: Any) -> Any | None:
+    if resolve.query_type is not None:
+        return_type = extract_query_return_type(resolve.query_type)
+        if get_origin(return_type) is dict:
+            return get_args(return_type)[0]
+        return None
+    return _resolver_key_type(resolve.resolver)
+
+
+def _collection_key_compatible(actual: Any, key_type: Any, *, nullable: bool) -> bool:
+    actual = _strip_annotated(actual)
+    if _allows_none(actual):
+        if not nullable:
+            return False
+        actual = _strip_none(actual)
+    origin = get_origin(actual)
+    args = get_args(actual)
+    return (
+        origin in (list, set, frozenset, tuple, Iterable, Sequence)
+        and bool(args)
+        and _types_compatible(args[0], key_type)
+    )
+
+
+def validate_raw_contract(annotation: 'QueryAnnotation') -> None:
+    """Validate a typed raw row against its resolved output model."""
+    raw_model = _raw_row_type(annotation.return_type)
+    if not is_typeddict(raw_model) and not (isinstance(raw_model, type) and issubclass(raw_model, BaseModel)):
+        return
+    render_target = annotation.render_target
+    if render_target is None:
+        return
+
+    from fastbff.resolve import get_resolve_fields
+
+    render_kind, output_model = render_target
+    raw_hints = get_type_hints(raw_model, include_extras=True)
+    raw_required_keys = getattr(raw_model, '__required_keys__', frozenset(raw_hints))
+    output_hints = get_type_hints(output_model, include_extras=True)
+    resolve_by_name = {field.name: field for field in get_resolve_fields(output_model)}
+    errors: list[str] = []
+
+    raw_is_list = get_origin(annotation.return_type) is list
+    if raw_is_list != (render_kind == 'list'):
+        expected_shape = 'list of rows' if render_kind == 'list' else 'single row'
+        actual_shape = 'list of rows' if raw_is_list else 'single row'
+        errors.append(f'handler returns {actual_shape}; output requires {expected_shape}')
+
+    for name, model_field in output_model.model_fields.items():
+        resolve_field = resolve_by_name.get(name)
+        source = resolve_field.source if resolve_field is not None else name
+        if source not in raw_hints:
+            if resolve_field is not None or model_field.is_required():
+                errors.append(f'missing raw key {source!r} for output field {name!r}')
+            continue
+
+        actual = raw_hints[source]
+        source_required = model_field.is_required()
+        if resolve_field is None:
+            expected = output_hints.get(name, model_field.annotation)
+        else:
+            key_type = _resolve_key_type(resolve_field.resolve)
+            if key_type is None:
+                # A resolver without a typed ``frozenset[K]`` first argument is
+                # still supported, but its raw key contract cannot be checked.
+                continue
+            nullable = _allows_none(resolve_field.annotation)
+            source_required = not nullable
+            expected = list[key_type] if resolve_field.is_collection else key_type
+            if nullable:
+                expected = expected | None
+
+        if source_required and source not in raw_required_keys:
+            errors.append(f'raw key {source!r} for output field {name!r} must be required')
+
+        compatible = (
+            _collection_key_compatible(actual, key_type, nullable=nullable)
+            if resolve_field is not None and resolve_field.is_collection and key_type is not None
+            else _types_compatible(actual, expected)
+        )
+        if not compatible:
+            errors.append(
+                f'raw key {source!r} for output field {name!r} has type {actual!r}; expected {expected!r}',
+            )
+
+    if errors:
+        query_name = annotation.query_type.__name__ if annotation.query_type is not None else '<unbound>'
+        handler_name = getattr(annotation.original_func, '__name__', repr(annotation.original_func))
+        details = '; '.join(errors)
+        raise QueryRegistrationError(
+            f'@queries {handler_name!r}: typed raw row is incompatible with '
+            f'{query_name} output {output_model.__name__}: {details}.',
+        )
 
 
 def _find_ids_field(query_cls: type, key_type: Any) -> str | None:
@@ -134,6 +311,7 @@ class QueryAnnotation:
                 expected_return is not None
                 and self.return_type != expected_return
                 and not _is_row_shaped(self.return_type)
+                and not (_is_pydantic_row(self.return_type) and _is_renderable_output(expected_return))
             ):
                 raise QueryRegistrationError(
                     f'@queries {original_func.__name__}: return type {self.return_type} '
@@ -171,10 +349,10 @@ class QueryAnnotation:
     def render_target(self) -> tuple[str, Any] | None:
         """Whether handler results should go through :func:`fastbff.resolve.render`.
 
-        Source of truth is ``Query[T].T`` — the *output* contract — so a handler
-        can honestly declare ``-> list[dict[str, Any]]`` while the framework
-        validates to ``Model`` at the dispatch boundary. ``None`` for entity
-        queries, primitives, and models without ``Resolve`` fields. Cached.
+        Source of truth is ``Query[T].T`` — the resolved output contract. A
+        handler may separately declare a TypedDict or Pydantic raw-row type,
+        which is checked during finalize. ``None`` for entity queries,
+        primitives, and models without ``Resolve`` fields. Cached.
         """
         if not self._render_cache:
             from fastbff.resolve import classify_render

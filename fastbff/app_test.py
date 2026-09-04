@@ -9,13 +9,17 @@ so composition needs no decorator.
 
 import asyncio
 from typing import Annotated
+from typing import Any
 from typing import Literal
+from typing import NotRequired
+from typing import TypedDict
 
 import pytest
 from fastapi import Depends
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+from pydantic import ConfigDict
 
 from fastbff import EntityQuery
 from fastbff import FastBFF
@@ -37,6 +41,12 @@ class _UserDTO(BaseModel):
 
 class _FetchUsers(EntityQuery[int, _UserDTO]):
     ids: frozenset[int]
+
+
+@pytest.mark.parametrize('source', ['', 123])
+def test_resolve_rejects_invalid_source(source: Any) -> None:
+    with pytest.raises(ResolveRegistrationError, match='non-empty string'):
+        Resolve(_FetchUsers, source=source)
 
 
 def test_bff_app_renders_a_resolve_field() -> None:
@@ -75,6 +85,111 @@ def test_bff_app_renders_a_resolve_field() -> None:
         _UserDTO(id=20, name='u20'),
         _UserDTO(id=10, name='u10'),
     ]
+
+
+def test_typed_dict_raw_row_contract_and_resolve_source() -> None:
+    app = FastBFF()
+
+    @app.queries
+    async def fetch_users(query: _FetchUsers) -> dict[int, _UserDTO]:
+        return {i: _UserDTO(id=i) for i in query.ids}
+
+    class _TeamRaw(TypedDict):
+        id: int
+        owner_id: int | None
+
+    class _TeamDTO(BaseModel):
+        model_config = ConfigDict(extra='forbid')
+
+        id: int
+        owner: Annotated[_UserDTO | None, Resolve(_FetchUsers, source='owner_id')]
+
+    class _FetchTeams(Query[list[_TeamDTO]]):
+        pass
+
+    @app.queries(_FetchTeams)
+    async def fetch_teams() -> list[_TeamRaw]:
+        return [{'id': 1, 'owner_id': 10}]
+
+    executor = app.finalize()()
+    result = asyncio.run(executor.fetch(_FetchTeams()))
+
+    assert result == [_TeamDTO(id=1, owner=_UserDTO(id=10))]
+
+
+def test_pydantic_raw_row_model_is_normalized_before_render() -> None:
+    app = FastBFF()
+
+    @app.queries
+    async def fetch_users(query: _FetchUsers) -> dict[int, _UserDTO]:
+        return {i: _UserDTO(id=i) for i in query.ids}
+
+    class _TeamRaw(BaseModel):
+        id: int
+        owner_id: int
+
+    class _TeamDTO(BaseModel):
+        model_config = ConfigDict(extra='forbid')
+
+        id: int
+        owner: Annotated[_UserDTO, Resolve(_FetchUsers, source='owner_id')]
+
+    class _FetchTeams(Query[list[_TeamDTO]]):
+        pass
+
+    @app.queries(_FetchTeams)
+    async def fetch_teams() -> list[_TeamRaw]:
+        return [_TeamRaw(id=1, owner_id=10)]
+
+    executor = app.finalize()()
+    result = asyncio.run(executor.fetch(_FetchTeams()))
+
+    assert result == [_TeamDTO(id=1, owner=_UserDTO(id=10))]
+
+
+@pytest.mark.parametrize(
+    ('raw_type', 'message'),
+    [
+        (
+            TypedDict('_MissingOwnerRaw', {'id': int}),
+            "missing raw key 'owner_id'",
+        ),
+        (
+            TypedDict('_WrongOwnerRaw', {'id': int, 'owner_id': str}),
+            "raw key 'owner_id'.*expected int.*None",
+        ),
+        (
+            TypedDict('_WrongIdRaw', {'id': str, 'owner_id': int | None}),
+            "raw key 'id'.*expected <class 'int'>",
+        ),
+        (
+            TypedDict('_OptionalIdRaw', {'id': NotRequired[int], 'owner_id': int | None}),
+            "raw key 'id'.*must be required",
+        ),
+    ],
+)
+def test_finalize_rejects_incompatible_typed_dict_raw_row(raw_type: type, message: str) -> None:
+    app = FastBFF()
+
+    @app.queries
+    async def fetch_users(query: _FetchUsers) -> dict[int, _UserDTO]:
+        return {}
+
+    class _TeamDTO(BaseModel):
+        id: int
+        owner: Annotated[_UserDTO | None, Resolve(_FetchUsers, source='owner_id')]
+
+    class _FetchTeams(Query[list[_TeamDTO]]):
+        pass
+
+    async def fetch_teams():
+        return []
+
+    fetch_teams.__annotations__['return'] = list[raw_type]
+    app.queries(_FetchTeams)(fetch_teams)
+
+    with pytest.raises(QueryRegistrationError, match=message):
+        app.finalize()
 
 
 def test_include_router_merges_queries() -> None:

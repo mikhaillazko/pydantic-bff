@@ -27,6 +27,7 @@ from .exceptions import ResolveRegistrationError
 from .query_executor.query import Query
 from .query_executor.query_annotation import QueryAnnotation
 from .query_executor.query_annotation import _is_query_subclass
+from .query_executor.query_annotation import validate_raw_contract
 from .query_executor.query_executor import QueryExecutor
 from .query_executor.query_executor import SyncQueryExecutor
 from .resolve import iter_resolves
@@ -215,6 +216,8 @@ class FastBFF:
             return self._provide_query_executor
 
         self._validate_resolve_targets()
+        for annotation in self._query_annotations.values():
+            validate_raw_contract(annotation)
 
         specs, handler_index = collect_dep_specs(
             handlers,

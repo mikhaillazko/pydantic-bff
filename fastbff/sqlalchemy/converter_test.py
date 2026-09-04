@@ -7,8 +7,11 @@ without involving the rest of fastbff. The integration test under
 """
 
 from typing import Any
+from typing import TypedDict
 
+import pytest
 from pydantic import BaseModel
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy import select
 from sqlalchemy.orm import DeclarativeBase
@@ -29,7 +32,12 @@ class _ItemRow(_Base):
     label: Mapped[str]
 
 
-class _ItemDTO(BaseModel):
+class _ItemRaw(TypedDict):
+    id: int
+    label: str
+
+
+class _ItemModel(BaseModel):
     id: int
     label: str
 
@@ -46,7 +54,7 @@ def _seeded_session() -> Session:
 def test_execute_all_returns_rows_keyed_by_field_name() -> None:
     converter = SqlalchemyConverter(_seeded_session())
 
-    rows: Any = converter.execute_all(select(_ItemRow.id, _ItemRow.label), list[_ItemDTO])
+    rows = converter.execute_all(select(_ItemRow.id, _ItemRow.label), _ItemRaw)
 
     assert rows == [{'id': 1, 'label': 'a'}, {'id': 2, 'label': 'b'}]
 
@@ -54,17 +62,33 @@ def test_execute_all_returns_rows_keyed_by_field_name() -> None:
 def test_execute_one_returns_first_row_or_none() -> None:
     converter = SqlalchemyConverter(_seeded_session())
 
-    first: Any = converter.execute_one(select(_ItemRow.id, _ItemRow.label).where(_ItemRow.id == 1), _ItemDTO)
-    missing: Any = converter.execute_one(select(_ItemRow.id, _ItemRow.label).where(_ItemRow.id == 999), _ItemDTO)
+    first = converter.execute_one(select(_ItemRow.id, _ItemRow.label).where(_ItemRow.id == 1), _ItemRaw)
+    missing = converter.execute_one(select(_ItemRow.id, _ItemRow.label).where(_ItemRow.id == 999), _ItemRaw)
 
     assert first == {'id': 1, 'label': 'a'}
     assert missing is None
 
 
-def test_label_renames_column_to_match_field_name() -> None:
+def test_validation_reports_a_mislabelled_column() -> None:
     converter = SqlalchemyConverter(_seeded_session())
 
     statement = select(_ItemRow.id, _ItemRow.label.label('renamed'))
-    rows: Any = converter.execute_all(statement, list[_ItemDTO])
+    with pytest.raises(ValidationError, match='label'):
+        converter.execute_all(statement, _ItemRaw)
+
+
+def test_raw_pydantic_model_is_supported() -> None:
+    converter = SqlalchemyConverter(_seeded_session())
+
+    rows = converter.execute_all(select(_ItemRow.id, _ItemRow.label), _ItemModel)
+
+    assert rows == [_ItemModel(id=1, label='a'), _ItemModel(id=2, label='b')]
+
+
+def test_validation_can_be_disabled_for_trusted_typed_dict_rows() -> None:
+    converter = SqlalchemyConverter(_seeded_session())
+    statement = select(_ItemRow.id, _ItemRow.label.label('renamed'))
+
+    rows: Any = converter.execute_all(statement, _ItemRaw, validate=False)
 
     assert rows == [{'id': 1, 'renamed': 'a'}, {'id': 2, 'renamed': 'b'}]

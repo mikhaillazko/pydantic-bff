@@ -54,28 +54,43 @@ class Resolve:
       ``(ids, *deps) -> dict[key, value]`` (sync or ``async def``). It receives
       the collected id-set plus any ``QueryExecutor`` / ``Depends(...)`` params
       injected the same way a ``@queries`` handler's are.
+    - ``source='owner_id'`` optionally reads the raw key from a differently
+      named field while writing the resolved value to the annotated field.
 
     ``Resolve`` is inert Pydantic metadata — it carries no core schema, so a
     model with ``Resolve`` fields validates as a plain model once the resolved
     values have been substituted in.
     """
 
-    __slots__ = ('query_type', 'resolver')
+    __slots__ = ('query_type', 'resolver', 'source')
 
-    def __init__(self, query_type: Any = None, *, resolver: Callable[..., Any] | None = None) -> None:
+    def __init__(
+        self,
+        query_type: Any = None,
+        *,
+        resolver: Callable[..., Any] | None = None,
+        source: str | None = None,
+    ) -> None:
         if (query_type is None) == (resolver is None):
             raise ResolveRegistrationError(
                 'Resolve(...) takes exactly one of a query type or resolver=<fn> — '
                 'e.g. Resolve(FetchUsers) or Resolve(resolver=resolve_owner).',
             )
+        if source is not None and (not isinstance(source, str) or not source):
+            raise ResolveRegistrationError('Resolve(..., source=...) must be a non-empty string.')
         self.query_type = query_type
         self.resolver = resolver
+        self.source = source
 
     def __repr__(self) -> str:
         if self.resolver is not None:
             name = getattr(self.resolver, '__name__', repr(self.resolver))
-            return f'Resolve(resolver={name})'
-        return f'Resolve({getattr(self.query_type, "__name__", self.query_type)})'
+            value = f'Resolve(resolver={name}'
+        else:
+            value = f'Resolve({getattr(self.query_type, "__name__", self.query_type)}'
+        if self.source is not None:
+            value += f', source={self.source!r}'
+        return value + ')'
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +98,11 @@ class ResolveField:
     name: str
     resolve: Resolve
     is_collection: bool
+    annotation: Any
+
+    @property
+    def source(self) -> str:
+        return self.resolve.source or self.name
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +168,14 @@ def _introspect(model: type[BaseModel]) -> tuple[list[ResolveField], list[Nested
         resolve = _find_resolve(metadata)
         if resolve is not None:
             _, is_collection = _analyze(field_type)
-            resolve_fields.append(ResolveField(name=field_name, resolve=resolve, is_collection=is_collection))
+            resolve_fields.append(
+                ResolveField(
+                    name=field_name,
+                    resolve=resolve,
+                    is_collection=is_collection,
+                    annotation=field_type,
+                ),
+            )
             continue
         core, is_collection = _analyze(field_type)
         if isinstance(core, type) and issubclass(core, BaseModel) and model_has_resolve(core):
@@ -230,7 +257,7 @@ async def render(model: type[BaseModel], rows: Sequence[Any], executor: Any) -> 
     if not resolve_fields and not nested_fields:
         return [model.model_validate(row) for row in row_list]
 
-    dict_rows = [dict(row) for row in row_list]
+    dict_rows = [row.model_dump(mode='python') if isinstance(row, BaseModel) else dict(row) for row in row_list]
 
     tasks = [_render_resolve(field, dict_rows, executor) for field in resolve_fields]
     tasks += [_render_nested(field, dict_rows, executor) for field in nested_fields]
@@ -240,6 +267,12 @@ async def render(model: type[BaseModel], rows: Sequence[Any], executor: Any) -> 
     for field, column in zip(all_fields, columns, strict=True):
         for row, value in zip(dict_rows, column, strict=True):
             row[field.name] = value
+
+    output_fields = model.model_fields
+    for field in resolve_fields:
+        if field.source != field.name and field.source not in output_fields:
+            for row in dict_rows:
+                row.pop(field.source, None)
 
     return [model.model_validate(row) for row in dict_rows]
 
@@ -252,7 +285,7 @@ async def _render_resolve(field: ResolveField, rows: list[dict[str, Any]], execu
     """Phase 1+2 for one resolve field → a per-row list of substituted values."""
     ids: set[Any] = set()
     for row in rows:
-        raw = row.get(field.name)
+        raw = row.get(field.source)
         if raw is None:
             continue
         if field.is_collection and _is_key_iterable(raw):
@@ -264,7 +297,7 @@ async def _render_resolve(field: ResolveField, rows: list[dict[str, Any]], execu
 
     column: list[Any] = []
     for row in rows:
-        raw = row.get(field.name)
+        raw = row.get(field.source)
         if field.is_collection:
             if raw is None or not _is_key_iterable(raw):
                 column.append([])
